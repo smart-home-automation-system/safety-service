@@ -3,6 +3,8 @@ package cloud.cholewa.safety.api;
 import cloud.cholewa.home.model.DeviceKind;
 import cloud.cholewa.home.model.RoomName;
 import cloud.cholewa.safety.config.ExceptionHandlerConfig;
+import cloud.cholewa.safety.database.AlarmStore;
+import cloud.cholewa.safety.detector.AlarmService;
 import cloud.cholewa.safety.detector.BaseState;
 import cloud.cholewa.safety.detector.DetectorFlag;
 import cloud.cholewa.safety.detector.DetectorState;
@@ -19,6 +21,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.reactive.server.WebTestClient;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
@@ -29,12 +32,13 @@ import java.util.List;
 
 import static cloud.cholewa.safety.registry.TestDevices.STATION;
 import static cloud.cholewa.safety.registry.TestDevices.detector;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
 //the reads of HAS-460 through the controller, the service and the state in memory - the fields are wire contract for
 //the dashboard; a field not known is left out, never a default. Times in the zone of the house (UTC+1 in November)
 @WebFluxTest(SafetyController.class)
-@Import({ExceptionHandlerConfig.class, SafetyService.class, SafetyStates.class, DetectorRegistry.class,
+@Import({ExceptionHandlerConfig.class, SafetyService.class, AlarmService.class, SafetyStates.class, DetectorRegistry.class,
     SafetyControllerTest.FixedClock.class})
 @ActiveProfiles("test")
 class SafetyControllerTest {
@@ -50,6 +54,50 @@ class SafetyControllerTest {
 
     @MockitoBean
     private DeviceRegistryClient client;
+    @MockitoBean
+    private AlarmStore alarmStore;
+
+    //HAS-461: the episodes of a period, the newest first; an open one without clearedAt, a mark not told left out, the
+    //name of a detector the registry no longer lists left out; the period asked in the wall time of the house
+    @Test
+    void should_answer_the_fire_alarms_of_a_period() {
+        readRegistry();
+        when(alarmStore.inPeriod(Instant.parse("2026-11-19T23:00:00Z"), Instant.parse("2026-11-20T23:00:00Z")))
+            .thenReturn(Flux.just(
+                new AlarmStore.AlarmEpisode(2L, 151L, "kitchen", NOW, null, NOW.plusSeconds(1), null),
+                new AlarmStore.AlarmEpisode(1L, 999L, "garage", NOW.minusSeconds(3600), NOW.minusSeconds(3000),
+                    null, NOW.minusSeconds(2999))));
+
+        webTestClient.get().uri("/alarms?from=2026-11-20T00:00:00&to=2026-11-21T00:00:00").exchange()
+            .expectStatus().isOk()
+            .expectBody()
+            .jsonPath("$.length()").isEqualTo(2)
+            .jsonPath("$[0].id").isEqualTo(2)
+            .jsonPath("$[0].detectorId").isEqualTo(151)
+            .jsonPath("$[0].name").isEqualTo("Smoke detector")
+            .jsonPath("$[0].room").isEqualTo("kitchen")
+            .jsonPath("$[0].startedAt").isEqualTo("2026-11-20T11:00:00")
+            .jsonPath("$[0].clearedAt").doesNotExist()
+            .jsonPath("$[0].alarmToldAt").isEqualTo("2026-11-20T11:00:01")
+            .jsonPath("$[0].overToldAt").doesNotExist()
+            .jsonPath("$[1].name").doesNotExist()
+            .jsonPath("$[1].clearedAt").isEqualTo("2026-11-20T10:10:00")
+            .jsonPath("$[1].alarmToldAt").doesNotExist();
+    }
+
+    @Test
+    void should_refuse_a_period_that_is_not_one() {
+        when(alarmStore.inPeriod(any(), any())).thenReturn(Flux.empty());
+
+        webTestClient.get().uri("/alarms?from=2026-11-20T00:00:00&to=2026-11-20T00:00:00").exchange()
+            .expectStatus().isBadRequest()
+            .expectBody().jsonPath("$.errors[0].code").isEqualTo("INVALID_RANGE");
+        webTestClient.get().uri("/alarms?from=2026-10-01T00:00:00&to=2026-10-31T00:00:01").exchange()
+            .expectStatus().isBadRequest()
+            .expectBody().jsonPath("$.errors[0].code").isEqualTo("INVALID_RANGE");
+        webTestClient.get().uri("/alarms?from=2026-10-01T00:00:00&to=2026-10-31T00:00:00").exchange()
+            .expectStatus().isOk();
+    }
 
     @Test
     void should_refuse_every_read_before_the_registry_is_read() {

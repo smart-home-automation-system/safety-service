@@ -1,6 +1,8 @@
 package cloud.cholewa.safety.detector;
 
+import cloud.cholewa.safety.database.AlarmStore;
 import cloud.cholewa.safety.database.StateStore;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 
@@ -9,6 +11,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class StateLoaderTest {
@@ -17,7 +20,27 @@ class StateLoaderTest {
 
     private final StateStore store = mock(StateStore.class);
     private final SafetyStates states = new SafetyStates();
-    private final StateLoader loader = new StateLoader(store, states);
+    private final AlarmStore alarms = mock(AlarmStore.class);
+    private final AlarmEpisodes episodes = mock(AlarmEpisodes.class);
+    private final StateLoader loader = new StateLoader(store, states, alarms, episodes);
+
+    @BeforeEach
+    void noOpenAlarms() {
+        when(alarms.openDetectors()).thenReturn(Flux.empty());
+    }
+
+    //HAS-461: the detectors with an open fire alarm, so that a Detected repeated after the start is no new alarm
+    @Test
+    void should_read_the_open_fire_alarms_back() {
+        when(store.detectors()).thenReturn(Flux.empty());
+        when(store.bases()).thenReturn(Flux.empty());
+        when(alarms.openDetectors()).thenReturn(Flux.just(150L, 152L));
+
+        loader.start();
+
+        verify(episodes).restoreOpen(150L);
+        verify(episodes).restoreOpen(152L);
+    }
 
     @Test
     void should_read_the_stored_states_back_not_confirmed() {

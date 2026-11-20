@@ -48,8 +48,8 @@ class SafetyServiceApplicationTest {
             .isEqualTo(10);
     }
 
-    //the passwords of the database and of the broker have no default: the start is refused without either
-    //(cholewa.required-properties)
+    //the passwords of the database, of the broker and of the notification connection (HAS-461) have no default: the start
+    //is refused without any of them (cholewa.required-properties)
     @Test
     void should_require_the_passwords_of_the_database_and_of_the_broker() {
         assertThat(applicationContext.getEnvironment().getProperty("cholewa.required-properties[0].property"))
@@ -60,7 +60,11 @@ class SafetyServiceApplicationTest {
             .isEqualTo("spring.rabbitmq.password");
         assertThat(applicationContext.getEnvironment().getProperty("cholewa.required-properties[1].variable"))
             .isEqualTo("rabbitmq-password");
-        assertThat(applicationContext.getEnvironment().getProperty("cholewa.required-properties[2].property")).isNull();
+        assertThat(applicationContext.getEnvironment().getProperty("cholewa.required-properties[2].property"))
+            .isEqualTo("notification.password");
+        assertThat(applicationContext.getEnvironment().getProperty("cholewa.required-properties[2].variable"))
+            .isEqualTo("notification-rabbitmq-password");
+        assertThat(applicationContext.getEnvironment().getProperty("cholewa.required-properties[3].property")).isNull();
     }
 
     //the events of the base: the queue of every device, the user device of /device, manual acks

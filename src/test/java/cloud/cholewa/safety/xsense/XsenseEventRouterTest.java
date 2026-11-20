@@ -7,6 +7,7 @@ import ch.qos.logback.core.read.ListAppender;
 import cloud.cholewa.home.model.DeviceKind;
 import cloud.cholewa.home.model.RoomName;
 import cloud.cholewa.safety.database.StateWriter;
+import cloud.cholewa.safety.detector.AlarmEpisodes;
 import cloud.cholewa.safety.detector.BaseState;
 import cloud.cholewa.safety.detector.DetectorFlag;
 import cloud.cholewa.safety.detector.DetectorState;
@@ -33,10 +34,13 @@ import static cloud.cholewa.safety.registry.TestDevices.STATION;
 import static cloud.cholewa.safety.registry.TestDevices.detector;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 //the messages as the base published them (2026-11-16, 2026-11-20), with an invented serial
@@ -49,8 +53,10 @@ class XsenseEventRouterTest {
     private final DetectorRegistry registry = new DetectorRegistry(client);
     private final SafetyStates states = new SafetyStates();
     private final StateWriter store = mock(StateWriter.class);
+    private final AlarmEpisodes episodes = mock(AlarmEpisodes.class);
     private final MovableClock clock = new MovableClock(NOW);
-    private final XsenseEventRouter router = new XsenseEventRouter(registry, states, store, JsonMapper.builder().build(), clock);
+    private final XsenseEventRouter router = new XsenseEventRouter(registry, states, store, episodes,
+        JsonMapper.builder().build(), clock);
     private final ListAppender<ILoggingEvent> routerLog = new ListAppender<>();
 
     @BeforeEach
@@ -94,6 +100,23 @@ class XsenseEventRouterTest {
         });
         //the first message and the change; the repeat confirms in memory only
         verify(store, times(2)).submit(any(DetectorState.class));
+    }
+
+    //HAS-461: every smokealarm message goes to the episodes, repeated or not - they decide; no other flag does
+    @Test
+    void should_hand_every_smokealarm_message_to_the_episodes() {
+        readRegistry();
+
+        route(ALARM, "{\"status\": \"Detected\"}");
+        route(ALARM, "{\"status\": \"Detected\"}");
+        route(ALARM, "{\"status\": \"Cleared\"}");
+        route("homeassistant.binary_sensor.SBS50ABCDEF01_00000001.SBS50ABCDEF01_00000001_battery.state",
+            "{\"status\": \"Low\"}");
+        route(ALARM, "{\"status\": \"Smoke\"}");
+
+        verify(episodes, times(2)).alarm(argThat(detector -> detector.id() == 150L), eq(true));
+        verify(episodes).alarm(argThat(detector -> detector.id() == 150L), eq(false));
+        verifyNoMoreInteractions(episodes);
     }
 
     @Test

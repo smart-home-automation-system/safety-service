@@ -18,7 +18,10 @@ public enum SafetyError implements ErrorId {
     NOT_FOUND_ROOM("Room not found"),
 
     //no detector of that id: not in the registry, switched off, or not a fire detector
-    NOT_FOUND_DETECTOR("Detector not found");
+    NOT_FOUND_DETECTOR("Detector not found"),
+
+    //the period of the fire alarms is not one: from not before to, or longer than 30 days (HAS-461)
+    INVALID_RANGE("Invalid range");
 
     private final String description;
 }

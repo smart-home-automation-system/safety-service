@@ -23,6 +23,7 @@ class ApplicationYamlTest {
 
         assertThat(shared.getProperty("spring.rabbitmq.password")).hasToString("${rabbitmq-password}");
         assertThat(shared.getProperty("database.password")).hasToString("${database-password}");
+        assertThat(shared.getProperty("notification.password")).hasToString("${notification-rabbitmq-password}");
     }
 
     //the local run takes the next free pair of ports of the organization, the cluster the pair of every service

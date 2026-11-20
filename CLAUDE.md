@@ -11,7 +11,9 @@ never scaled (state in memory). Org-wide rules: `organization-repository/claude/
 
 - Talks to: the device events on `device.prod.safety` of `/device` (user `device`, definitions 1.10.0) - the topics of
   the base in `deployment-tools/scripts/xsense/devices.md`; the same connection publishes the birth message to
-  `amq.topic`; database-service for the detectors of the registry.
+  `amq.topic`; database-service for the detectors of the registry. Since HAS-461 a second connection to `/notification`
+  (user `notification`, `notification-rabbitmq-password`) publishes the fire alarm to the `household` category -
+  notification-service >= 0.14.0 (HAS-462) words it.
 - Uses libraries: cholewa-commons, smart-home-sdk.
 - Database: own database `home-automation-safety`, 2 of the 47 connections of the managed PostgreSQL.
 - Integrates with hardware: the X-Sense SBS50 base and its detectors, only through the broker - the base listens on no
@@ -19,7 +21,8 @@ never scaled (state in memory). Org-wide rules: `organization-repository/claude/
 
 ## Build & run
 
-- Build + tests: `mvn verify` - **needs a running Docker** (`StateStoreTest`: the upserts on Testcontainers PostgreSQL).
+- Build + tests: `mvn verify` - **needs a running Docker** (`StateStoreTest`, `AlarmStoreTest`: Testcontainers
+  PostgreSQL).
 - Local run: `local` Spring profile, port `6017` (Actuator `8017`); the real values reach the production database and
   the real base.
 
@@ -66,5 +69,24 @@ never scaled (state in memory). Org-wide rules: `organization-repository/claude/
   `/{id}`; the times are `LocalDateTime` of the house, as gate-service answers them; a field not known left out
   (`@JsonInclude(NON_NULL)`), a detector never heard answered with its registry fields alone (`confirmed` left out).
   The codes of `SafetyError` are wire contract for the dashboard (`SafetyErrorTest`).
-- Nothing is told yet: the alarm episodes and the household messages are HAS-461 (notification-service HAS-462 reads
-  `fire alarm` first), the technical monitor of the detectors and the base HAS-463.
+- **The fire alarm episodes** (HAS-461, `detector/AlarmEpisodes`): **the memory decides** - a set of the detectors with an
+  open episode, read back at the start by `StateLoader` (`AlarmStore.openDetectors`). Every `smokealarm` message, repeated
+  or not, reaches it from the router after memory changed: Detected of a detector not in the set opens, Cleared of one in
+  it closes, a Cleared without one is a DEBUG (the base republishes Cleared of every detector at the hourly resync), a
+  repeated Detected nothing - decided atomically in the listener, the instant taken there. The work runs off the
+  listener in one sink, one episode after the other: the row (`AlarmStore`, waited for `STORE_WITHIN` - 5 s - at most:
+  the store retries for a minute and a half, and a fire alarm is told within seconds), then the household
+  (`HouseholdNotifier`, bounded at 30 s, false and a WARN when not told - never an error), then the mark of what the
+  broker took. **The household is told whatever the database says**; a write cut off may still land, only its mark is
+  lost. **`detector_alarm` (V2)**: one row per episode, `room` as the registry had it, the partial unique index
+  `detector_alarm_open_uq` - one open episode per detector; `open` answers the id of the open episode, new or already
+  there (a retry after a timeout must find its own row - so the store never decides whether to tell). Accepted in the
+  review of HAS-461: a Cleared that overtakes its Detected in the prefetch of 3 leaves the episode open until the next
+  resync (the base sends them seconds apart); a detector switched off or removed while in alarm never closes (its
+  messages are dropped); a start that cannot read the open episodes back tells an ongoing alarm again (twice beats
+  never). Never a reminder - the detectors sound themselves. `NotificationRabbitConfig` is the ninth copy (owner's rule,
+  organization.md), not a bean of a `ConnectionFactory` - `NotificationConnection.create`, named `<pod>/notification`.
+- **`GET /alarms?from=&to=`** (`detector/AlarmService`): the episodes that overlap the period of the house (at most 30
+  days, `INVALID_RANGE`), the newest first, the name the registry's now; the alarm of a detector in the reads stays its
+  flag `{value, since}`.
+- The technical monitor of the detectors and the base is HAS-463.
