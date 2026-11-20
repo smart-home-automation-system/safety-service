@@ -1,8 +1,10 @@
 package cloud.cholewa.safety.api;
 
+import cloud.cholewa.commons.notification.NotificationPublisher;
 import cloud.cholewa.home.model.DeviceKind;
 import cloud.cholewa.home.model.RoomName;
 import cloud.cholewa.safety.config.ExceptionHandlerConfig;
+import cloud.cholewa.safety.config.SafetyProperties;
 import cloud.cholewa.safety.database.AlarmStore;
 import cloud.cholewa.safety.detector.AlarmService;
 import cloud.cholewa.safety.detector.BaseState;
@@ -10,10 +12,16 @@ import cloud.cholewa.safety.detector.DetectorFlag;
 import cloud.cholewa.safety.detector.DetectorState;
 import cloud.cholewa.safety.detector.SafetyService;
 import cloud.cholewa.safety.detector.SafetyStates;
+import cloud.cholewa.safety.monitor.AlertEvaluator;
+import cloud.cholewa.safety.monitor.AlertKind;
+import cloud.cholewa.safety.monitor.AlertStore;
+import cloud.cholewa.safety.monitor.StatusService;
+import cloud.cholewa.safety.monitor.TechnicalMonitor;
 import cloud.cholewa.safety.registry.DetectorRegistry;
 import cloud.cholewa.safety.registry.DeviceRegistryClient;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webflux.test.autoconfigure.WebFluxTest;
 import org.springframework.context.annotation.Bean;
@@ -38,7 +46,8 @@ import static org.mockito.Mockito.when;
 //the reads of HAS-460 through the controller, the service and the state in memory - the fields are wire contract for
 //the dashboard; a field not known is left out, never a default. Times in the zone of the house (UTC+1 in November)
 @WebFluxTest(SafetyController.class)
-@Import({ExceptionHandlerConfig.class, SafetyService.class, AlarmService.class, SafetyStates.class, DetectorRegistry.class,
+@Import({ExceptionHandlerConfig.class, SafetyService.class, AlarmService.class, StatusService.class, TechnicalMonitor.class,
+    SafetyStates.class, DetectorRegistry.class,
     SafetyControllerTest.FixedClock.class})
 @ActiveProfiles("test")
 class SafetyControllerTest {
@@ -56,6 +65,39 @@ class SafetyControllerTest {
     private DeviceRegistryClient client;
     @MockitoBean
     private AlarmStore alarmStore;
+    @MockitoBean
+    private AlertStore alertStore;
+    @MockitoBean
+    private NotificationPublisher notificationPublisher;
+
+    //HAS-463: the base with its reachability, last heard and network, the detectors in trouble judged now, the open
+    //alerts as stored
+    @Test
+    void should_answer_the_technical_state() {
+        readRegistry();
+        states.changeBase(STATION, serial -> BaseState.unknown(serial, NOW),
+            base -> base.withOnline(true, NOW).withNetwork("192.0.2.82", "iot", -35, NOW));
+        states.changeDetector(151L, id -> DetectorState.unknown(id, NOW),
+            state -> state.withFlag(DetectorFlag.BATTERY_LOW, true, NOW).withFlag(DetectorFlag.FAULT, true, NOW));
+        when(alertStore.open()).thenReturn(Flux.just(new AlertEvaluator.Alert(AlertKind.BATTERY_LOW, "151",
+            "the detector Smoke detector in kitchen (151)", NOW, true, NOW)));
+
+        webTestClient.get().uri("/status").exchange()
+            .expectStatus().isOk()
+            .expectBody()
+            .jsonPath("$.bases[0].stationSerial").isEqualTo(STATION)
+            .jsonPath("$.bases[0].reachable").isEqualTo(true)
+            .jsonPath("$.bases[0].lastHeardAt").isEqualTo("2026-11-20T11:00:00")
+            .jsonPath("$.bases[0].ipAddress").isEqualTo("192.0.2.82")
+            .jsonPath("$.bases[0].wifiRssi").isEqualTo(-35)
+            .jsonPath("$.bases[0].silent").isEqualTo(false)
+            .jsonPath("$.detectorsInTrouble").isEqualTo(1)
+            .jsonPath("$.alerts[0].kind").isEqualTo("battery")
+            .jsonPath("$.alerts[0].device").isEqualTo("151")
+            .jsonPath("$.alerts[0].since").isEqualTo("2026-11-20T11:00:00")
+            .jsonPath("$.alerts[0].told").isEqualTo(true);
+    }
+
 
     //HAS-461: the episodes of a period, the newest first; an open one without clearedAt, a mark not told left out, the
     //name of a detector the registry no longer lists left out; the period asked in the wall time of the house
@@ -191,6 +233,7 @@ class SafetyControllerTest {
     }
 
     @TestConfiguration
+    @EnableConfigurationProperties(SafetyProperties.class)
     static class FixedClock {
 
         @Bean

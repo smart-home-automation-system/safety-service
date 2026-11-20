@@ -76,10 +76,13 @@ class SafetyServiceApplicationTest {
             .isEqualTo("manual");
     }
 
-    //the registry read every 5 min, the base asked every hour - bound in minutes, never milliseconds
+    //the registry read every 5 min, the base asked every 10 min and silent after 30 (HAS-463), a reminder every hour -
+    //bound in minutes, never milliseconds
     @Test
-    void should_read_the_registry_every_five_minutes_and_ask_the_base_every_hour() {
+    void should_read_the_registry_every_five_minutes_and_ask_the_base_every_ten() {
         assertThat(safetyProperties.registry().refreshEvery()).isEqualTo(Duration.ofMinutes(5));
-        assertThat(safetyProperties.base().resyncEvery()).isEqualTo(Duration.ofHours(1));
+        assertThat(safetyProperties.base().resyncEvery()).isEqualTo(Duration.ofMinutes(10));
+        assertThat(safetyProperties.base().silentAfter()).isEqualTo(Duration.ofMinutes(30));
+        assertThat(safetyProperties.monitor().reminderEvery()).isEqualTo(Duration.ofHours(1));
     }
 }

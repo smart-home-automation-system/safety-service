@@ -39,19 +39,26 @@ base station) from what its base publishes to the broker over MQTT - the Home As
   base its availability (online / offline, also the last will of the broker) and its network (address, Wi-Fi, RSSI).
   Each value with the moment it took it.
 - **The birth message of Home Assistant**: `online` on `homeassistant/status` once the registry is first read and then
-  every hour (`safety.base.resync-every`) - the base answers by republishing the state of every detector, so a restart
+  every 10 minutes (`safety.base.resync-every`, since HAS-463) - the base answers by republishing the state of every detector, so a restart
   of the service or of the base loses nothing.
 - **Kept across a restart**: `detector_state` and `base_state` hold the last state of every detector and base, written
   on a change only, never on a message that repeats a value, and read back at the start as not confirmed until the
   next message of the base.
 - **A fire alarm** (HAS-461): a `smokealarm` Detected opens an episode in `detector_alarm`, its Cleared closes it; a
   Detected of a detector with an alarm open is no new one, a Cleared without one is ignored (the base republishes the
-  state every hour). Each episode tells the household twice - `fire alarm` when it opens, `fire alarm over` when it
+  state at every resync). Each episode tells the household twice - `fire alarm` when it opens, `fire alarm over` when it
   closes, the detector of the registry the subject, its room the room - through the `household` category of the
   notification exchange (notification-service >= 0.14.0 words it in Polish, texts and pushes it to every member at
   home or not). Never a reminder: the detectors sound themselves. The household is told whatever the database says
   (it waits 5 s for the row at most); the episode records when the broker took each message.
-- Nothing here commands a detector; the monitor of the detectors and the base comes with HAS-463.
+- **The technical monitor** (HAS-463): every minute a detector offline, low on battery, at its end of life or faulty
+  (the state its base reports, at once), and a base offline (its availability, or the last will the broker publishes -
+  back once anything comes from it again) or silent (nothing from it nor its detectors for `safety.base.silent-after`,
+  30 min; the base is asked to republish every `safety.base.resync-every`, 10 min) are told on the technical channel -
+  one alert a pass naming everything, a reminder every `safety.monitor.reminder-every` (1 h), one info on the return; an
+  alert that never got through is announced with the return. Never the household, never an SMS. The episodes are kept
+  in `safety_alert` (V3), so a restart repeats no alert.
+- Nothing here commands a detector.
 
 # API
 
@@ -62,13 +69,14 @@ a default.
 |---|---|---|
 | `GET` | `/` | `detectors` - every fire detector of the registry by id: `id`, `name`, `room`, `kind`, `stationSerial`, `deviceId`, then what its base said - `alarm`, `online`, `batteryLow`, `endOfLife`, `fault`, `muted`, `selfTestProblem` (each `{value, since}`), `model`, `firmware`, `lastHeardAt`, `confirmed` (false: read back at the start, not confirmed by the base since); `bases` - every base heard by serial: `stationSerial`, `online` `{value, since}`, `ipAddress`, `wifiSsid`, `wifiRssi`, `lastHeardAt`, `confirmed`. `503 REGISTRY_UNAVAILABLE` before the first read of the registry. |
 | `GET` | `/alarms?from=&to=` | The fire alarm episodes that overlap the period (the time of the house, `from` included, `to` not, at most 30 days), the newest first: `id`, `detectorId`, `name` (the registry's now, left out for a detector it no longer lists), `room`, `startedAt`, `clearedAt` (left out while it lasts), `alarmToldAt` / `overToldAt` (left out when the household could not be told). `400 INVALID_RANGE`. |
+| `GET` | `/status` | The technical state (HAS-463): `bases` - every base station of the registry: `stationSerial`, `reachable` (its availability, left out while not known), `lastHeardAt` (itself or any of its detectors), `ipAddress`, `wifiRssi`, `silent`; `detectorsInTrouble` - how many detectors report offline, low battery, end of life or a fault now; `alerts` - the open alerts of the monitor: `kind` (`offline`, `battery`, `end of life`, `fault`, `base offline`, `base silent`), `device`, `name`, `since`, `told`. `503 REGISTRY_UNAVAILABLE` before the first read of the registry. |
 | `GET` | `/rooms/{room}` | The detectors of a room (`living room`, ...); `404 NOT_FOUND_ROOM` for a room without one or no room at all. |
 | `GET` | `/{id}` | One detector by its registry id; `404 NOT_FOUND_DETECTOR`. |
 
 # Run locally
 
-- Build: `mvn verify` (JDK 21) - **needs a running Docker**: the tests of the state tables and of the alarm episodes
-  run on PostgreSQL in Testcontainers.
+- Build: `mvn verify` (JDK 21) - **needs a running Docker**: the tests of the state tables, the alarm episodes and the
+  technical alerts run on PostgreSQL in Testcontainers.
 - Ports: local profile `6017` (management `8017`); in the cluster `6200` / `8200`.
 - Own database `home-automation-safety`, pool 2: `database-host`, `database-port`, `database-name`, `database-user`,
   `database-password` and `flyway-url`; `database-password` is mandatory (`cholewa.required-properties`), the rest
