@@ -1,0 +1,182 @@
+spring:
+  application:
+    name: safety-service
+    version: @project.version@
+  profiles:
+    active: home
+  webflux:
+    base-path: "/home/safety"
+  reactor:
+    # default LIMITED restores ThreadLocals only in "tap" and "handle", so traceId would be
+    # missing from the MDC of every log statement inside a reactive chain
+    context-propagation: auto
+  rabbitmq:
+    host: rabbitmq-headless
+    port: 5672
+    # the events of every device: the X-Sense base station publishes its detectors over MQTT to amq.topic of /device,
+    # and device.prod.safety is bound with "#" like every device queue; the same connection publishes the birth message
+    username: device
+    # no default on purpose: with one the pod would start, turn Ready and consume nothing - cholewa.required-properties
+    # refuses the start without the variable
+    password: ${rabbitmq-password}
+    virtual-host: /device
+    connection-timeout: 10s
+    requested-heartbeat: 10s
+    template:
+      # both default to false; without them the trace breaks at the queue
+      observation-enabled: true
+    listener:
+      simple:
+        observation-enabled: true
+        # the listener returns a Mono; with the default AUTO mode the container acks before the message is handled
+        acknowledge-mode: manual
+        # how many events are in flight at once, the rest waits in the broker - as in gate-service
+        prefetch: 3
+  flyway:
+    url: ${flyway-url:jdbc:postgresql://${database.host}:${database.port}/${database.name}}
+    user: ${database.username}
+    password: ${database.password}
+    enabled: on
+
+database:
+  host: ${database-host:localhost}
+  port: ${database-port:5432}
+  name: ${database-name:dummyName}
+  username: ${database-user:dummyUser}
+  # no default on purpose: cholewa.required-properties refuses the start without it, before Flyway or
+  # the pool try a password that is not one
+  password: ${database-password}
+  pool:
+    # this service's share of the 47 connections of the managed database (heating 2 / database 4 /
+    # water 2 / presence 2 / blinds 2 / weather 2 / light 2 / appliance 2 / energy 2 / aircon 2 / gate 2 / safety 2 - 26
+    # allotted, with the 3 of ristretto 29 of 47, HAS-460). The Deployment is Recreate, so a rollout holds one
+    # pool at a time; Flyway opens one more connection
+    max-size: 2
+
+rabbitmq:
+  queue:
+    name: device.prod.safety
+
+safety:
+  # the detectors of the device registry (the kinds smoke, co and heat detector) read again
+  registry:
+    refresh-every: PT5M
+  # the birth message of Home Assistant (homeassistant/status online) sent again, so that a base restarted since
+  # republishes the state of its detectors
+  base:
+    resync-every: PT1H
+
+internal:
+  service:
+    # the detectors of the device registry
+    database: http://database-service:6200
+
+cholewa:
+  # refuses the start before the first bean when one of these has no value (cholewa-commons >= 1.9.0)
+  required-properties:
+    - property: database.password
+      variable: database-password
+    - property: spring.rabbitmq.password
+      variable: rabbitmq-password
+
+server:
+  port: 6200
+management:
+  server:
+    port: 8200
+  endpoint:
+    health:
+      # a 404 on the readiness path crash-loops the pod, so the probe groups are pinned here
+      # instead of relying on Boot detecting the Kubernetes platform — and kept in the shared
+      # document, where the paths can be exercised locally on 8017 before the manifest ships
+      probes:
+        enabled: true
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  tracing:
+    sampling:
+      # default 0.1; a home system generates so little traffic that sampling everything is free,
+      # and a partially sampled trace is useless when it is the only record of a request
+      probability: 1.0
+
+logbook:
+  format:
+    style: json
+
+logging:
+  structured:
+    format:
+      console: logstash
+  level:
+    org.zalando.logbook: trace
+
+---
+
+spring:
+  config:
+    activate:
+      on-profile: local
+
+  rabbitmq:
+    host: localhost
+
+rabbitmq:
+  queue:
+    name: device.dev.safety
+
+internal:
+  service:
+    database: http://localhost:6005
+
+server:
+  port: 6017
+management:
+  server:
+    port: 8017
+
+logbook:
+  format:
+    style: http
+
+logging:
+  structured:
+    format:
+      console: ""
+---
+
+spring:
+  config:
+    activate:
+      on-profile: test
+  flyway:
+    enabled: false
+  # a context test starts the listener: the broker is at an address nothing listens on, so that a test cannot reach it
+  # even where the name resolves
+  rabbitmq:
+    host: localhost
+    port: 1
+    password: test
+
+rabbitmq:
+  queue:
+    name: device.test.safety
+
+# database-service at an address nothing listens on: a context test never reads the registry of the house
+internal:
+  service:
+    database: http://localhost:1
+
+# the pool opens nothing eagerly, and Flyway is off: a context test never reaches a database
+database:
+  password: test
+
+logbook:
+  format:
+    style: http
+
+logging:
+  structured:
+    format:
+      console: ""
