@@ -55,17 +55,17 @@ public class XsenseEventRouter {
 
     private Mono<Void> route(final XsenseTopic topic, final String routingKey, final byte[] body) {
         return switch (topic) {
-            case XsenseTopic.EntityState entity -> detector(entity.detector())
-                .map(detector -> entityState(detector, entity.entity(), routingKey, body))
+            case XsenseTopic.EntityState(DetectorKey key, String entity) -> detector(key)
+                .map(detector -> entityState(detector, entity, routingKey, body))
                 .orElseGet(Mono::empty);
-            case XsenseTopic.EntityConfig config -> detector(config.detector())
+            case XsenseTopic.EntityConfig(DetectorKey key) -> detector(key)
                 .map(detector -> entityConfig(detector, routingKey, body))
                 .orElseGet(Mono::empty);
-            case XsenseTopic.SelfTest selfTest -> detector(selfTest.detector())
+            case XsenseTopic.SelfTest(DetectorKey key) -> detector(key)
                 .map(detector -> selfTest(detector, routingKey, body))
                 .orElseGet(Mono::empty);
-            case XsenseTopic.BaseAvailability availability -> baseAvailability(availability.stationSerial(), body);
-            case XsenseTopic.BaseNetwork network -> baseNetwork(network.stationSerial(), routingKey, body);
+            case XsenseTopic.BaseAvailability(String stationSerial) -> baseAvailability(stationSerial, body);
+            case XsenseTopic.BaseNetwork(String stationSerial) -> baseNetwork(stationSerial, routingKey, body);
         };
     }
 

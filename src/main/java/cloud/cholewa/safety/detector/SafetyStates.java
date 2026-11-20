@@ -8,6 +8,7 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
+import java.util.function.LongFunction;
 import java.util.function.UnaryOperator;
 
 /**
@@ -41,7 +42,7 @@ public class SafetyStates {
      */
     public Optional<DetectorState> changeDetector(
         final long detectorId,
-        final Function<Long, DetectorState> unknown,
+        final LongFunction<DetectorState> unknown,
         final UnaryOperator<DetectorState> change
     ) {
         final AtomicReference<DetectorState> before = new AtomicReference<>();

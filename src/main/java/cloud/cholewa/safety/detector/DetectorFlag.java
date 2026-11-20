@@ -18,15 +18,24 @@ public enum DetectorFlag {
 
     ALARM("smokealarm", "Detected", "Cleared"),
     ONLINE("online", "Online", "Offline"),
-    BATTERY_LOW("battery", "Low", "Normal"),
-    END_OF_LIFE("lifeend", "EOL", "Normal"),
-    FAULT("smokefault", "Fault", "Normal"),
-    MUTED("muted", "Muted", "Normal"),
+    BATTERY_LOW("battery", "Low", Words.NORMAL),
+    END_OF_LIFE("lifeend", "EOL", Words.NORMAL),
+    FAULT("smokefault", "Fault", Words.NORMAL),
+    MUTED("muted", "Muted", Words.NORMAL),
     SELF_TEST_PROBLEM(null, null, null);
 
     private final String entity;
     private final String on;
     private final String off;
+
+    //the word of every flag that is off but the alarm and online - a holder, an enum constant cannot read a static field
+    //of its own enum declared after it
+    private static final class Words {
+        private static final String NORMAL = "Normal";
+
+        private Words() {
+        }
+    }
 
     public static Optional<DetectorFlag> ofEntity(final String entity) {
         return Arrays.stream(values())
