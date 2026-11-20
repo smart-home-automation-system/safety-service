@@ -72,10 +72,15 @@ safety:
   # the detectors of the device registry (the kinds smoke, co and heat detector) read again
   registry:
     refresh-every: PT5M
-  # the birth message of Home Assistant (homeassistant/status online) sent again, so that a base restarted since
-  # republishes the state of its detectors
+  # the birth message of Home Assistant (homeassistant/status online) sent again, so that the base republishes the state
+  # of its detectors - every 10 min since HAS-463, so that a base saying nothing for silent-after is silent (it publishes
+  # on a change only, and answered only the hourly resync before)
   base:
-    resync-every: PT1H
+    resync-every: PT10M
+    silent-after: PT30M
+  # the technical monitor of the detectors and the base (HAS-463): a reminder of an open alert
+  monitor:
+    reminder-every: PT1H
 
 internal:
   service:

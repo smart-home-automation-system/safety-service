@@ -61,7 +61,7 @@ never scaled (state in memory). Org-wide rules: `organization-repository/claude/
 - **The birth message** (`xsense/BirthMessage`): `online`, plain text, persistent (QoS 1 for the MQTT subscriber) to
   `amq.topic` with the routing key `homeassistant.status` - sent by the pass of the registry of `SafetySchedule` once the
   registry is known (the messages before were dropped) and until the broker took one, then every
-  `safety.base.resync-every` (1 h). The base
+  `safety.base.resync-every` (10 min since HAS-463, 1 h before). The base
   answers with every state within seconds; on 2026-11-20 it sent no discovery with it, so the model and firmware come
   only when the base sends its discovery on its own (its reconnect). RabbitTemplate blocks, so the send runs on
   boundedElastic, bounded at 20 s (inside the 50 s of the pass after its three reads); a failure is a WARN and `false`. Every device queue gets the message (bound `#`), none reads it.
@@ -72,7 +72,7 @@ never scaled (state in memory). Org-wide rules: `organization-repository/claude/
 - **The fire alarm episodes** (HAS-461, `detector/AlarmEpisodes`): **the memory decides** - a set of the detectors with an
   open episode, read back at the start by `StateLoader` (`AlarmStore.openDetectors`). Every `smokealarm` message, repeated
   or not, reaches it from the router after memory changed: Detected of a detector not in the set opens, Cleared of one in
-  it closes, a Cleared without one is a DEBUG (the base republishes Cleared of every detector at the hourly resync), a
+  it closes, a Cleared without one is a DEBUG (the base republishes Cleared of every detector at every resync), a
   repeated Detected nothing - decided atomically in the listener, the instant taken there. The work runs off the
   listener in one sink, one episode after the other: the row (`AlarmStore`, waited for `STORE_WITHIN` - 5 s - at most:
   the store retries for a minute and a half, and a fire alarm is told within seconds), then the household
@@ -89,4 +89,24 @@ never scaled (state in memory). Org-wide rules: `organization-repository/claude/
 - **`GET /alarms?from=&to=`** (`detector/AlarmService`): the episodes that overlap the period of the house (at most 30
   days, `INVALID_RANGE`), the newest first, the name the registry's now; the alarm of a detector in the reads stays its
   flag `{value, since}`.
-- The technical monitor of the detectors and the base is HAS-463.
+- **The technical monitor** (HAS-463, `monitor/`): `TechnicalMonitor` every minute (2 min after the start, bounded at
+  55 s) builds what is watched - per detector of the registry its four problems (`AlertKind`: offline, battery,
+  end of life, fault - out while the flag says so, since the flag took that value, not known while the base never
+  reported it, at once), per base of them offline and silent - and `AlertEvaluator` (pure, a copy of the evaluator of
+  gate-service HAS-453; aircon-service and light-service carry the same rules - the fourth copy, kept by the owner's
+  choice like `NotificationRabbitConfig`) decides against the open episodes of `safety_alert` (V3, one open per item -
+  the partial unique index, the closed ones kept): one return, one alert and one reminder a pass at most, each naming
+  everything, on the technical channel (`publishInfo` / `publishAlert` / `publishReminder`) - never the household, never
+  an SMS. A row is written when due and marked told once the broker took it; a publish is cut off after 15 s and tried
+  again with the next pass. No pass before the registry is known (every detector would look removed). Settled in the
+  review of HAS-463: **a base is offline while its last word is offline and nothing came from it since** (it need not say
+  online again after its last will); **the silence of a base known offline is not told apart**; **the silence counts from
+  the start of the service at the earliest** (a state read back holds the last heard of its last write). **The base is
+  asked to republish every 10 min** (`safety.base.resync-every`, owner 2026-11-20 - it publishes on a change only, and
+  answered the hourly resync alone before), so `safety.base.silent-after` (30 min) is a real silence; `SafetyProperties`
+  refuses a silence not longer than the resync. **`GET /status`** (`StatusService`) judges by the same rules
+  (`TechnicalMonitor.watched`).
+- **Boot 4.2 is not taken yet** (checked 2026-11-20): Boot 4.2.0 moved RabbitMQ to `spring-boot-starter-rabbitmq`
+  (`org.springframework.boot.rabbitmq.autoconfigure`) and `spring-boot-starter-amqp` no longer brings `spring-rabbit` -
+  the listener, `BirthMessage` and `NotificationRabbitConfig` do not compile, and cholewa-commons 1.14.0 reaches the
+  classes of Boot 4.1; cholewa-commons moves first.

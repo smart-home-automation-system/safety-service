@@ -3,8 +3,10 @@ package cloud.cholewa.safety.api;
 import cloud.cholewa.safety.api.model.AlarmReply;
 import cloud.cholewa.safety.api.model.DetectorReply;
 import cloud.cholewa.safety.api.model.SafetyReply;
+import cloud.cholewa.safety.api.model.StatusReply;
 import cloud.cholewa.safety.detector.AlarmService;
 import cloud.cholewa.safety.detector.SafetyService;
+import cloud.cholewa.safety.monitor.StatusService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -17,13 +19,20 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 //The reads of the fire detectors (HAS-460), base path /home/safety: every detector and base, the detectors of a room,
-//one detector; since HAS-461 the fire alarm episodes of a period. Reads only - nothing here commands a detector
+//one detector; since HAS-461 the fire alarm episodes of a period, since HAS-463 the technical state. Reads only - nothing here commands a detector
 @RestController
 @RequiredArgsConstructor
 public class SafetyController {
 
     private final SafetyService service;
     private final AlarmService alarmService;
+    private final StatusService statusService;
+
+    //the technical state (HAS-463): the bases, the detectors in trouble, the open alerts of the technical monitor
+    @GetMapping("/status")
+    Mono<StatusReply> status() {
+        return statusService.status();
+    }
 
     @GetMapping
     Mono<SafetyReply> all() {
