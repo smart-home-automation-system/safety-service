@@ -1,6 +1,7 @@
 package cloud.cholewa.safety.xsense;
 
 import cloud.cholewa.safety.database.StateWriter;
+import cloud.cholewa.safety.detector.AlarmEpisodes;
 import cloud.cholewa.safety.detector.BaseState;
 import cloud.cholewa.safety.detector.DetectorFlag;
 import cloud.cholewa.safety.detector.DetectorState;
@@ -30,7 +31,8 @@ import java.util.function.UnaryOperator;
  * detector the registry does not list - both without a word. A body that is not what its topic carries, or a word that
  * is neither of the two of its flag, is a WARN and changes nothing (a word only once per flag, a base may repeat it
  * every hour). A changed value is handed to {@link StateWriter} - the message is acknowledged once memory changed; a
- * repeated one only confirms the state in memory.
+ * repeated one only confirms the state in memory. Every smokealarm message also goes to {@link AlarmEpisodes} (HAS-461),
+ * which opens or closes a fire alarm and tells the household.
  */
 @Slf4j
 @Component
@@ -40,6 +42,7 @@ public class XsenseEventRouter {
     private final DetectorRegistry registry;
     private final SafetyStates states;
     private final StateWriter writer;
+    private final AlarmEpisodes episodes;
     private final JsonMapper jsonMapper;
     private final Clock clock;
 
@@ -88,8 +91,19 @@ public class XsenseEventRouter {
             .flatMap(payload -> Mono.justOrEmpty(payload.status())
                 .switchIfEmpty(Mono.fromRunnable(() -> log.warn("The message {} carries no status", routingKey)))
                 .flatMap(status -> flag.get().valueOfWord(status)
-                    .map(value -> changeDetector(detector, state -> state.withFlag(flag.get(), value, now())))
+                    .map(value -> changeDetector(detector, state -> state.withFlag(flag.get(), value, now()))
+                        .then(alarmEpisode(detector, flag.get(), value)))
                     .orElseGet(() -> unknownWord(flag.get(), status, routingKey))));
+    }
+
+    //every smokealarm message, repeated or not, after memory changed: the episodes decide whether it opens or closes one
+    //(HAS-461) - their work runs off the listener
+    private Mono<Void> alarmEpisode(final Detector detector, final DetectorFlag flag, final boolean value) {
+        return Mono.fromRunnable(() -> {
+            if (flag == DetectorFlag.ALARM) {
+                episodes.alarm(detector, value);
+            }
+        });
     }
 
     private Mono<Void> entityConfig(final Detector detector, final String routingKey, final byte[] body) {

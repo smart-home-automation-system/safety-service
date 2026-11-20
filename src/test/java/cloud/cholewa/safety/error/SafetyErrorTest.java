@@ -12,6 +12,6 @@ class SafetyErrorTest {
     @Test
     void should_keep_the_codes_the_dashboard_reads() {
         assertThat(Arrays.stream(SafetyError.values()).map(Enum::name))
-            .containsExactly("REGISTRY_UNAVAILABLE", "NOT_FOUND_ROOM", "NOT_FOUND_DETECTOR");
+            .containsExactly("REGISTRY_UNAVAILABLE", "NOT_FOUND_ROOM", "NOT_FOUND_DETECTOR", "INVALID_RANGE");
     }
 }

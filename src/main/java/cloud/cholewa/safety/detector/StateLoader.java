@@ -1,5 +1,6 @@
 package cloud.cholewa.safety.detector;
 
+import cloud.cholewa.safety.database.AlarmStore;
 import cloud.cholewa.safety.database.StateStore;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -13,7 +14,7 @@ import java.time.Duration;
 /**
  * Reads the stored state of the detectors and the bases back before the device listener (phase
  * {@code Integer.MAX_VALUE}) starts - a lifecycle of phase 0, the shape of GarageReadingLoader of gate-service. Read back
- * as not confirmed, never over a state a message set first.
+ * as not confirmed, never over a state a message set first. Since HAS-461 also the detectors with an open fire alarm.
  * <p>
  * <b>Never fatal</b>: without it the API knows nothing until the base speaks; the wait is bounded.
  */
@@ -28,6 +29,8 @@ public class StateLoader implements SmartLifecycle {
 
     private final StateStore store;
     private final SafetyStates states;
+    private final AlarmStore alarms;
+    private final AlarmEpisodes episodes;
 
     private volatile boolean running;
 
@@ -36,7 +39,9 @@ public class StateLoader implements SmartLifecycle {
         //blocking on purpose, bounded: two queries, before the first message of a base
         Mono.when(
                 store.detectors().doOnNext(states::restore),
-                store.bases().doOnNext(states::restore))
+                store.bases().doOnNext(states::restore),
+                //the open fire alarms (HAS-461): a Detected repeated after the start is no new alarm
+                alarms.openDetectors().doOnNext(episodes::restoreOpen))
             .timeout(STARTUP_TIMEOUT)
             .doOnError(e -> log.warn("The stored state of the detectors was not read back in {}, the start knows none: {}",
                 STARTUP_TIMEOUT, e.toString()))

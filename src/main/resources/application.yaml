@@ -57,6 +57,17 @@ rabbitmq:
   queue:
     name: device.prod.safety
 
+# the household told of a fire alarm (HAS-461): a second connection, to /notification - the exchange lives on another
+# virtual host than the device events (NotificationRabbitConfig). cholewa.notification.enabled of cholewa-commons stays
+# unset: its publisher uses the connection to /device
+notification:
+  virtual-host: /notification
+  username: notification
+  # no default on purpose: cholewa.required-properties refuses the start without the variable
+  password: ${notification-rabbitmq-password}
+  exchange: notification
+  env: prod
+
 safety:
   # the detectors of the device registry (the kinds smoke, co and heat detector) read again
   registry:
@@ -78,6 +89,8 @@ cholewa:
       variable: database-password
     - property: spring.rabbitmq.password
       variable: rabbitmq-password
+    - property: notification.password
+      variable: notification-rabbitmq-password
 
 server:
   port: 6200
@@ -126,6 +139,9 @@ rabbitmq:
   queue:
     name: device.dev.safety
 
+notification:
+  env: dev
+
 internal:
   service:
     database: http://localhost:6005
@@ -162,6 +178,10 @@ spring:
 rabbitmq:
   queue:
     name: device.test.safety
+
+notification:
+  password: test
+  env: test
 
 # database-service at an address nothing listens on: a context test never reads the registry of the house
 internal:

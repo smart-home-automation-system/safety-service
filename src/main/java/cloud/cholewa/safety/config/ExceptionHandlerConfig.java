@@ -14,6 +14,7 @@ import org.springframework.http.codec.ServerCodecConfigurer;
 
 import java.util.Map;
 
+import static org.springframework.http.HttpStatus.BAD_REQUEST;
 import static org.springframework.http.HttpStatus.NOT_FOUND;
 import static org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE;
 
@@ -36,7 +37,8 @@ public class ExceptionHandlerConfig {
             new DomainExceptionProcessor(SERVICE_UNAVAILABLE, SafetyError.REGISTRY_UNAVAILABLE),
             SafetyException.RoomNotFound.class, new DomainExceptionProcessor(NOT_FOUND, SafetyError.NOT_FOUND_ROOM),
             SafetyException.DetectorNotFound.class,
-            new DomainExceptionProcessor(NOT_FOUND, SafetyError.NOT_FOUND_DETECTOR)
+            new DomainExceptionProcessor(NOT_FOUND, SafetyError.NOT_FOUND_DETECTOR),
+            SafetyException.InvalidRange.class, new DomainExceptionProcessor(BAD_REQUEST, SafetyError.INVALID_RANGE)
         ));
     }
 }

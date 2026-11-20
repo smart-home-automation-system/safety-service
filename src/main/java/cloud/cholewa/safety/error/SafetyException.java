@@ -26,6 +26,12 @@ public abstract class SafetyException extends RuntimeException {
         }
     }
 
+    public static final class InvalidRange extends SafetyException {
+        public InvalidRange(final String reason) {
+            super(SafetyError.INVALID_RANGE, reason);
+        }
+    }
+
     public static final class DetectorNotFound extends SafetyException {
         public DetectorNotFound(final long id) {
             super(SafetyError.NOT_FOUND_DETECTOR, "No fire detector of the id " + id);
