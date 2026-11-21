@@ -21,8 +21,8 @@ never scaled (state in memory). Org-wide rules: `organization-repository/claude/
 
 ## Build & run
 
-- Build + tests: `mvn verify` - **needs a running Docker** (`StateStoreTest`, `AlarmStoreTest`: Testcontainers
-  PostgreSQL).
+- Build + tests: `mvn verify` - **needs a running Docker** (`StateStoreTest`, `AlarmStoreTest`, `AlertStoreTest`,
+  `CommandStoreTest`: Testcontainers PostgreSQL).
 - Local run: `local` Spring profile, port `6017` (Actuator `8017`); the real values reach the production database and
   the real base.
 
@@ -106,6 +106,30 @@ never scaled (state in memory). Org-wide rules: `organization-repository/claude/
   answered the hourly resync alone before), so `safety.base.silent-after` (30 min) is a real silence; `SafetyProperties`
   refuses a silence not longer than the resync. **`GET /status`** (`StatusService`) judges by the same rules
   (`TechnicalMonitor.watched`).
+- **The commands of a detector** (HAS-464, `command/`): `POST /{id}/mute`, `/{id}/self-test` (`?source=` -
+  `CommandSource`: `dashboard` by default, `manual`; `CommandSourceConverter`, a Converter bean Boot adds to WebFlux)
+  -> `CommandService`: the registry known (`503`), the detector (`404`), **one command per detector a minute**
+  (`DetectorCommands.reserve`, a mute and a self test alike, `429 COMMAND_TOO_SOON`; given back when the broker did not
+  take it - `502 COMMAND_NOT_SENT`), then `xsense/CommandMessage` - **the topic** `xsense/sbs50/<S>/device/<id>/cmd`
+  (the routing key `xsense.sbs50.<S>.device.<id>.cmd` of `amq.topic`; the base binds one per detector and
+  `station.cmd` - 13 bindings, seen 2026-11-16 and 2026-11-20) and **the payload** the base announces in the configs of
+  its buttons, `{"requestId":"sh-<uuid>","cmd":"mute"|"self_test","params":{}}`, persistent (QoS 1), never retained,
+  over the connection of `/device` (RabbitTemplate on boundedElastic, bounded at 10 s). **Sent once, never repeated.** The
+  command comes back on `device.prod.safety` (bound `#`) and is dropped as every `cmd` topic. **Confirmation**
+  (`CommandWatch`, pure, the rule of water-service HAS-321): a mute by `muted` Muted taken at or after the sending, a
+  self test by a message of its self test - dated by the base (its `time`, epoch seconds) it answers only a test sent
+  before it (`BASE_CLOCK_TOLERANCE` 30 s for a base clock behind ours; the base republishes the last result at every
+  resync), undated as it is taken - within `CommandService.WINDOW` (60 s); the router hands them to `CommandService`
+  after memory changed. A Muted of a resync also confirms a mute (accepted in the review of HAS-464: it says the detector
+  is muted). **A send that returns proves only that the connection wrote it** - no publisher confirms, no mandatory
+  returns, an unrouted command vanishes in `amq.topic`: the answer of the base is the proof. A send cut off by its 10 s
+  may still go out, so it is taken like a sent one (202, its minute kept, watched); a send that failed gives its minute
+  back (`502 COMMAND_NOT_SENT` - no text in the dashboard yet, its generic failure). `lastCommandConfirmed` of the reads: left out with no command and while one waits, false after the window,
+  true once answered. The third unconfirmed in a row of a detector is an alert on the technical channel, once a run (not
+  announced when the publish failed - the next tries again). In memory: a restart forgets the minute and the judgement.
+  **`safety_command` (V4)**: a row per command sent (bounded at 5 s, a WARN otherwise - the command stands),
+  `confirmed_at` marked by the request id once the insert of that row ended (a fast answer would update no row); `GET /{id}/commands` the last 50. What the base did with the first real
+  commands: to be written here after the try with the owner.
 - **Boot 4.2 is not taken yet** (checked 2026-11-20): Boot 4.2.0 moved RabbitMQ to `spring-boot-starter-rabbitmq`
   (`org.springframework.boot.rabbitmq.autoconfigure`) and `spring-boot-starter-amqp` no longer brings `spring-rabbit` -
   the listener, `BirthMessage` and `NotificationRabbitConfig` do not compile, and cholewa-commons 1.14.0 reaches the
