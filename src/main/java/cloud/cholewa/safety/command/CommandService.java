@@ -149,7 +149,7 @@ public class CommandService {
             })
             .then(inserted)
             .thenReturn(new CommandReply(detector.id(), pending.command().getValue(), source.getValue(),
-                pending.requestId(), house(pending.sentAt()).truncatedTo(ChronoUnit.SECONDS)));
+                pending.requestId(), houseOf(pending.sentAt()).truncatedTo(ChronoUnit.SECONDS)));
     }
 
     private void watch(final Detector detector, final CommandWatch.Pending pending) {
@@ -175,7 +175,7 @@ public class CommandService {
 
     //not announced when the alert fails: the next unconfirmed command tries again
     private Mono<Void> alert(final Detector detector, final CommandWatch.Pending pending, final int inARow) {
-        final String text = alertText(detector, pending, inARow, house(pending.sentAt()));
+        final String text = alertText(detector, pending, inARow, houseOf(pending.sentAt()));
         return notificationPublisher.publishAlert(text)
             .timeout(NOTICE_TIMEOUT)
             .then(Mono.<Void>fromRunnable(() -> {
@@ -202,7 +202,12 @@ public class CommandService {
         return clock.instant();
     }
 
+    //a time that may be missing (a command not confirmed): null for none
     private LocalDateTime house(final Instant instant) {
-        return instant == null ? null : LocalDateTime.ofInstant(instant, clock.getZone());
+        return instant == null ? null : houseOf(instant);
+    }
+
+    private LocalDateTime houseOf(final Instant instant) {
+        return LocalDateTime.ofInstant(instant, clock.getZone());
     }
 }
