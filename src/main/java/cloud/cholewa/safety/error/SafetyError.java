@@ -21,7 +21,13 @@ public enum SafetyError implements ErrorId {
     NOT_FOUND_DETECTOR("Detector not found"),
 
     //the period of the fire alarms is not one: from not before to, or longer than 30 days (HAS-461)
-    INVALID_RANGE("Invalid range");
+    INVALID_RANGE("Invalid range"),
+
+    //a command of this detector was sent less than a minute ago (HAS-464)
+    COMMAND_TOO_SOON("Command too soon"),
+
+    //the command could not be sent to the broker - the base got nothing (HAS-464)
+    COMMAND_NOT_SENT("Command not sent");
 
     private final String description;
 }

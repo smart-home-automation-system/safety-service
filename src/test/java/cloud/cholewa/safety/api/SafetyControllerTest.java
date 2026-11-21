@@ -3,9 +3,14 @@ package cloud.cholewa.safety.api;
 import cloud.cholewa.commons.notification.NotificationPublisher;
 import cloud.cholewa.home.model.DeviceKind;
 import cloud.cholewa.home.model.RoomName;
+import cloud.cholewa.safety.command.CommandService;
+import cloud.cholewa.safety.command.CommandSourceConverter;
+import cloud.cholewa.safety.command.DetectorCommand;
+import cloud.cholewa.safety.command.DetectorCommands;
 import cloud.cholewa.safety.config.ExceptionHandlerConfig;
 import cloud.cholewa.safety.config.SafetyProperties;
 import cloud.cholewa.safety.database.AlarmStore;
+import cloud.cholewa.safety.database.CommandStore;
 import cloud.cholewa.safety.detector.AlarmService;
 import cloud.cholewa.safety.detector.BaseState;
 import cloud.cholewa.safety.detector.DetectorFlag;
@@ -19,6 +24,7 @@ import cloud.cholewa.safety.monitor.StatusService;
 import cloud.cholewa.safety.monitor.TechnicalMonitor;
 import cloud.cholewa.safety.registry.DetectorRegistry;
 import cloud.cholewa.safety.registry.DeviceRegistryClient;
+import cloud.cholewa.safety.xsense.CommandMessage;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -26,6 +32,7 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webflux.test.autoconfigure.WebFluxTest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.reactive.server.WebTestClient;
@@ -40,15 +47,21 @@ import java.util.List;
 
 import static cloud.cholewa.safety.registry.TestDevices.STATION;
 import static cloud.cholewa.safety.registry.TestDevices.detector;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 //the reads of HAS-460 through the controller, the service and the state in memory - the fields are wire contract for
 //the dashboard; a field not known is left out, never a default. Times in the zone of the house (UTC+1 in November)
 @WebFluxTest(SafetyController.class)
 @Import({ExceptionHandlerConfig.class, SafetyService.class, AlarmService.class, StatusService.class, TechnicalMonitor.class,
-    SafetyStates.class, DetectorRegistry.class,
-    SafetyControllerTest.FixedClock.class})
+    SafetyStates.class, DetectorRegistry.class, CommandService.class, DetectorCommands.class,
+    CommandSourceConverter.class, SafetyControllerTest.FixedClock.class})
 @ActiveProfiles("test")
 class SafetyControllerTest {
 
@@ -69,6 +82,93 @@ class SafetyControllerTest {
     private AlertStore alertStore;
     @MockitoBean
     private NotificationPublisher notificationPublisher;
+    @MockitoBean
+    private CommandMessage commandMessage;
+    @MockitoBean
+    private CommandStore commandStore;
+    @Autowired
+    private CommandService commandService;
+
+    //HAS-464: 202 once the command was sent - to the topic of the detector, with a request id; one command per
+    //detector a minute (429), the source by its word; whether the base answered is lastCommandConfirmed of the reads -
+    //left out while the command waits, true once a muted Muted answered it. The minutes and the judgements it leaves in
+    //memory would refuse the commands of the next tests: a fresh context after it
+    @Test
+    @DirtiesContext(methodMode = DirtiesContext.MethodMode.AFTER_METHOD)
+    void should_send_a_command_once_a_minute_and_tell_whether_the_base_answered() {
+        readRegistry();
+        when(commandMessage.send(anyString(), anyString(), anyString(), any())).thenReturn(Mono.empty());
+        when(commandStore.insert(anyLong(), anyString(), anyString(), anyString(), any())).thenReturn(Mono.empty());
+        when(commandStore.confirm(anyString(), any())).thenReturn(Mono.empty());
+
+        webTestClient.post().uri("/150/mute").exchange()
+            .expectStatus().isAccepted()
+            .expectBody()
+            .jsonPath("$.detectorId").isEqualTo(150)
+            .jsonPath("$.command").isEqualTo("mute")
+            .jsonPath("$.source").isEqualTo("dashboard")
+            .jsonPath("$.requestId").value(id -> assertThat((String) id).startsWith("sh-"))
+            .jsonPath("$.sentAt").isEqualTo("2026-11-20T11:00:00");
+        verify(commandMessage).send(eq(STATION), eq("00000001"), anyString(), eq(DetectorCommand.MUTE));
+        webTestClient.post().uri("/150/self-test").exchange()
+            .expectStatus().isEqualTo(429)
+            .expectBody().jsonPath("$.errors[0].code").isEqualTo("COMMAND_TOO_SOON");
+        webTestClient.post().uri("/151/self-test?source=manual").exchange()
+            .expectStatus().isAccepted()
+            .expectBody()
+            .jsonPath("$.command").isEqualTo("self test")
+            .jsonPath("$.source").isEqualTo("manual");
+        webTestClient.get().uri("/150").exchange()
+            .expectBody().jsonPath("$.lastCommandConfirmed").doesNotExist();
+
+        commandService.reported(150L, DetectorCommand.MUTE);
+
+        webTestClient.get().uri("/150").exchange()
+            .expectBody().jsonPath("$.lastCommandConfirmed").isEqualTo(true);
+        verify(commandStore).confirm(anyString(), eq(NOW));
+    }
+
+    //a source not one of the words, a detector not in the registry, a broker that did not take it (the minute given
+    //back)
+    @Test
+    void should_refuse_a_command_it_cannot_send() {
+        readRegistry();
+        when(commandMessage.send(anyString(), anyString(), anyString(), any()))
+            .thenReturn(Mono.error(new IllegalStateException("broker away")));
+
+        webTestClient.post().uri("/150/mute?source=robot").exchange().expectStatus().isBadRequest();
+        webTestClient.post().uri("/999/mute").exchange()
+            .expectStatus().isNotFound()
+            .expectBody().jsonPath("$.errors[0].code").isEqualTo("NOT_FOUND_DETECTOR");
+        webTestClient.post().uri("/150/mute").exchange()
+            .expectStatus().isEqualTo(502)
+            .expectBody().jsonPath("$.errors[0].code").isEqualTo("COMMAND_NOT_SENT");
+        webTestClient.post().uri("/150/mute").exchange()
+            .expectStatus().isEqualTo(502);
+        verify(commandStore, never()).insert(anyLong(), anyString(), anyString(), anyString(), any());
+    }
+
+    //the last commands of a detector as stored, a confirmation left out while there is none
+    @Test
+    void should_answer_the_last_commands_of_a_detector() {
+        readRegistry();
+        when(commandStore.last(150L, 50)).thenReturn(Flux.just(
+            new CommandStore.CommandRow("sh-2", "self test", "dashboard", NOW, null),
+            new CommandStore.CommandRow("sh-1", "mute", "manual", NOW.minusSeconds(600), NOW.minusSeconds(595))));
+
+        webTestClient.get().uri("/150/commands").exchange()
+            .expectStatus().isOk()
+            .expectBody()
+            .jsonPath("$.length()").isEqualTo(2)
+            .jsonPath("$[0].requestId").isEqualTo("sh-2")
+            .jsonPath("$[0].command").isEqualTo("self test")
+            .jsonPath("$[0].sentAt").isEqualTo("2026-11-20T11:00:00")
+            .jsonPath("$[0].confirmedAt").doesNotExist()
+            .jsonPath("$[1].source").isEqualTo("manual")
+            .jsonPath("$[1].confirmedAt").isEqualTo("2026-11-20T10:50:05");
+        webTestClient.get().uri("/999/commands").exchange()
+            .expectStatus().isNotFound();
+    }
 
     //HAS-463: the base with its reachability, last heard and network, the detectors in trouble judged now, the open
     //alerts as stored

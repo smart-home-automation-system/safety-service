@@ -1,5 +1,7 @@
 package cloud.cholewa.safety.xsense;
 
+import cloud.cholewa.safety.command.CommandService;
+import cloud.cholewa.safety.command.DetectorCommand;
 import cloud.cholewa.safety.database.StateWriter;
 import cloud.cholewa.safety.detector.AlarmEpisodes;
 import cloud.cholewa.safety.detector.BaseState;
@@ -32,7 +34,8 @@ import java.util.function.UnaryOperator;
  * is neither of the two of its flag, is a WARN and changes nothing (a word only once per flag, a base may repeat it
  * every hour). A changed value is handed to {@link StateWriter} - the message is acknowledged once memory changed; a
  * repeated one only confirms the state in memory. Every smokealarm message also goes to {@link AlarmEpisodes} (HAS-461),
- * which opens or closes a fire alarm and tells the household.
+ * which opens or closes a fire alarm and tells the household; a muted Muted and every message of a self test go to
+ * {@link CommandService} (HAS-464), which confirms the command of the detector they answer.
  */
 @Slf4j
 @Component
@@ -43,6 +46,7 @@ public class XsenseEventRouter {
     private final SafetyStates states;
     private final StateWriter writer;
     private final AlarmEpisodes episodes;
+    private final CommandService commands;
     private final JsonMapper jsonMapper;
     private final Clock clock;
 
@@ -92,7 +96,8 @@ public class XsenseEventRouter {
                 .switchIfEmpty(Mono.fromRunnable(() -> log.warn("The message {} carries no status", routingKey)))
                 .flatMap(status -> flag.get().valueOfWord(status)
                     .map(value -> changeDetector(detector, state -> state.withFlag(flag.get(), value, now()))
-                        .then(alarmEpisode(detector, flag.get(), value)))
+                        .then(alarmEpisode(detector, flag.get(), value))
+                        .then(muteAnswered(detector, flag.get(), value)))
                     .orElseGet(() -> unknownWord(flag.get(), status, routingKey))));
     }
 
@@ -102,6 +107,15 @@ public class XsenseEventRouter {
         return Mono.fromRunnable(() -> {
             if (flag == DetectorFlag.ALARM) {
                 episodes.alarm(detector, value);
+            }
+        });
+    }
+
+    //a muted Muted answers a mute (HAS-464) - a repeat of the resync too, accepted: it says the detector is muted
+    private Mono<Void> muteAnswered(final Detector detector, final DetectorFlag flag, final boolean value) {
+        return Mono.fromRunnable(() -> {
+            if (flag == DetectorFlag.MUTED && value) {
+                commands.reported(detector.id(), DetectorCommand.MUTE);
             }
         });
     }
@@ -118,7 +132,9 @@ public class XsenseEventRouter {
             .flatMap(payload -> Mono.justOrEmpty(payload.problem())
                 .switchIfEmpty(Mono.fromRunnable(() -> log.warn("The message {} carries no problem", routingKey)))
                 .flatMap(problem -> changeDetector(detector,
-                    state -> state.withFlag(DetectorFlag.SELF_TEST_PROBLEM, problem, now()))));
+                    state -> state.withFlag(DetectorFlag.SELF_TEST_PROBLEM, problem, now()))
+                    .then(Mono.fromRunnable(() -> commands.selfTestReported(detector.id(),
+                        Optional.ofNullable(payload.time()).map(Instant::ofEpochSecond).orElse(null))))));
     }
 
     //plain text: online, or offline - its own word or the last will the broker publishes when it drops
@@ -185,7 +201,8 @@ public class XsenseEventRouter {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    record SelfTestPayload(Boolean problem) {
+    //time - when the base ran the test, epoch seconds; left out by a base that does not send it
+    record SelfTestPayload(Boolean problem, Long time) {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
