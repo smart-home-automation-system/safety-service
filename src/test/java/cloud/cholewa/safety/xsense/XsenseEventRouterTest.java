@@ -6,6 +6,8 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import cloud.cholewa.home.model.DeviceKind;
 import cloud.cholewa.home.model.RoomName;
+import cloud.cholewa.safety.command.CommandService;
+import cloud.cholewa.safety.command.DetectorCommand;
 import cloud.cholewa.safety.database.StateWriter;
 import cloud.cholewa.safety.detector.AlarmEpisodes;
 import cloud.cholewa.safety.detector.BaseState;
@@ -54,8 +56,9 @@ class XsenseEventRouterTest {
     private final SafetyStates states = new SafetyStates();
     private final StateWriter store = mock(StateWriter.class);
     private final AlarmEpisodes episodes = mock(AlarmEpisodes.class);
+    private final CommandService commands = mock(CommandService.class);
     private final MovableClock clock = new MovableClock(NOW);
-    private final XsenseEventRouter router = new XsenseEventRouter(registry, states, store, episodes,
+    private final XsenseEventRouter router = new XsenseEventRouter(registry, states, store, episodes, commands,
         JsonMapper.builder().build(), clock);
     private final ListAppender<ILoggingEvent> routerLog = new ListAppender<>();
 
@@ -119,6 +122,27 @@ class XsenseEventRouterTest {
         verifyNoMoreInteractions(episodes);
     }
 
+    //HAS-464: a muted Muted answers a mute and every message of a self test a self test - after memory changed; muted
+    //Normal and the other flags answer nothing, nor does the command topic of the base (our own command coming back)
+    @Test
+    void should_hand_the_answers_of_the_base_to_the_commands() {
+        readRegistry();
+        final String muted = "homeassistant.binary_sensor.SBS50ABCDEF01_00000001.SBS50ABCDEF01_00000001_muted.state";
+
+        route(muted, "{\"status\": \"Normal\"}");
+        route(muted, "{\"status\": \"Muted\"}");
+        route("xsense.sbs50.SBS50ABCDEF01_00000001.self_test.state", "{\"problem\": false}");
+        route(ALARM, "{\"status\": \"Detected\"}");
+        route("xsense.sbs50.SBS50ABCDEF01.device.00000001.cmd",
+            "{\"requestId\": \"sh-1\", \"cmd\": \"mute\", \"params\": {}}");
+
+        verify(commands).reported(150L, DetectorCommand.MUTE);
+        verify(commands).selfTestReported(150L, null);
+        verifyNoMoreInteractions(commands);
+        assertThat(states.detector(150L)).hasValueSatisfying(state ->
+            assertThat(state.flag(DetectorFlag.MUTED).value()).isTrue());
+    }
+
     @Test
     void should_read_every_flag_of_the_smoke_detector() {
         readRegistry();
@@ -139,6 +163,8 @@ class XsenseEventRouterTest {
             assertThat(state.flag(DetectorFlag.SELF_TEST_PROBLEM).value()).isTrue();
             assertThat(state.flag(DetectorFlag.ALARM)).isNull();
         });
+        //HAS-464: the time of the test goes with it to the commands
+        verify(commands).selfTestReported(150L, Instant.ofEpochSecond(1763632800L));
     }
 
     @Test

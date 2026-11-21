@@ -5,6 +5,7 @@ import cloud.cholewa.safety.api.model.BaseReply;
 import cloud.cholewa.safety.api.model.DetectorReply;
 import cloud.cholewa.safety.api.model.FlagReply;
 import cloud.cholewa.safety.api.model.SafetyReply;
+import cloud.cholewa.safety.command.DetectorCommands;
 import cloud.cholewa.safety.error.SafetyException;
 import cloud.cholewa.safety.registry.Detector;
 import cloud.cholewa.safety.registry.DetectorRegistry;
@@ -30,6 +31,7 @@ public class SafetyService {
 
     private final DetectorRegistry registry;
     private final SafetyStates states;
+    private final DetectorCommands commands;
     private final Clock clock;
 
     public Mono<SafetyReply> all() {
@@ -89,7 +91,8 @@ public class SafetyService {
             state.map(DetectorState::model).orElse(null),
             state.map(DetectorState::firmware).orElse(null),
             state.map(DetectorState::lastHeardAt).map(this::house).orElse(null),
-            state.map(DetectorState::confirmed).orElse(null));
+            state.map(DetectorState::confirmed).orElse(null),
+            commands.lastConfirmed(detector.id()).orElse(null));
     }
 
     private BaseReply reply(final BaseState base) {

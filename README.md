@@ -58,7 +58,13 @@ base station) from what its base publishes to the broker over MQTT - the Home As
   one alert a pass naming everything, a reminder every `safety.monitor.reminder-every` (1 h), one info on the return; an
   alert that never got through is announced with the return. Never the household, never an SMS. The episodes are kept
   in `safety_alert` (V3), so a restart repeats no alert.
-- Nothing here commands a detector.
+- **The mute and the self test of a detector** (HAS-464): one command per detector a minute, published once to the
+  topic the base subscribes to for that detector - `xsense/sbs50/<station>/device/<id>/cmd` (the routing key
+  `xsense.sbs50.<station>.device.<id>.cmd` of `amq.topic` in `/device`), QoS 1, never retained - with the JSON the
+  base announces in the configs of its buttons, `{"requestId": "sh-<uuid>", "cmd": "mute" | "self_test", "params": {}}`.
+  Never repeated. The base answers by the state of the detector: a mute is confirmed by `muted` Muted, a self test by a
+  message of its self test, each within 60 s; the third unconfirmed command of a detector in a row is an alert on the
+  technical channel. Every command sent is kept in `safety_command` (V4); a self test the base dates (its `time`) answers only a test sent before it.
 
 # API
 
@@ -71,12 +77,15 @@ a default.
 | `GET` | `/alarms?from=&to=` | The fire alarm episodes that overlap the period (the time of the house, `from` included, `to` not, at most 30 days), the newest first: `id`, `detectorId`, `name` (the registry's now, left out for a detector it no longer lists), `room`, `startedAt`, `clearedAt` (left out while it lasts), `alarmToldAt` / `overToldAt` (left out when the household could not be told). `400 INVALID_RANGE`. |
 | `GET` | `/status` | The technical state (HAS-463): `bases` - every base station of the registry: `stationSerial`, `reachable` (its availability, left out while not known), `lastHeardAt` (itself or any of its detectors), `ipAddress`, `wifiRssi`, `silent`; `detectorsInTrouble` - how many detectors report offline, low battery, end of life or a fault now; `alerts` - the open alerts of the monitor: `kind` (`offline`, `battery`, `end of life`, `fault`, `base offline`, `base silent`), `device`, `name`, `since`, `told`. `503 REGISTRY_UNAVAILABLE` before the first read of the registry. |
 | `GET` | `/rooms/{room}` | The detectors of a room (`living room`, ...); `404 NOT_FOUND_ROOM` for a room without one or no room at all. |
-| `GET` | `/{id}` | One detector by its registry id; `404 NOT_FOUND_DETECTOR`. |
+| `GET` | `/{id}` | One detector by its registry id; `404 NOT_FOUND_DETECTOR`. Since HAS-464 a detector also answers `lastCommandConfirmed` - false once the base did not answer its last mute or self test within 60 s, true once it did, left out with no command since the start and while one waits. |
+| `POST` | `/{id}/mute?source=` | Mutes the detector (HAS-464): the command published to its base once, `202` with `detectorId`, `command` (`mute`), `source`, `requestId`, `sentAt`. `source` - `dashboard` (the default) or `manual`, any other word `400`. `404 NOT_FOUND_DETECTOR`, `429 COMMAND_TOO_SOON` (one command per detector a minute), `502 COMMAND_NOT_SENT` (it could not be sent; a send cut off by its timeout may still go out and is answered `202`), `503 REGISTRY_UNAVAILABLE`. |
+| `POST` | `/{id}/self-test?source=` | Starts the self test of the detector, as the mute (`command` `self test`). |
+| `GET` | `/{id}/commands` | The last 50 commands of the detector, the newest first: `requestId`, `command`, `source`, `sentAt`, `confirmedAt` (left out while the base has not answered). `404 NOT_FOUND_DETECTOR`. |
 
 # Run locally
 
-- Build: `mvn verify` (JDK 21) - **needs a running Docker**: the tests of the state tables, the alarm episodes and the
-  technical alerts run on PostgreSQL in Testcontainers.
+- Build: `mvn verify` (JDK 21) - **needs a running Docker**: the tests of the state tables, the alarm episodes, the
+  technical alerts and the commands run on PostgreSQL in Testcontainers.
 - Ports: local profile `6017` (management `8017`); in the cluster `6200` / `8200`.
 - Own database `home-automation-safety`, pool 2: `database-host`, `database-port`, `database-name`, `database-user`,
   `database-password` and `flyway-url`; `database-password` is mandatory (`cholewa.required-properties`), the rest

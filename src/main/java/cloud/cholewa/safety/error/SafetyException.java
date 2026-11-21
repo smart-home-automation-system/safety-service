@@ -32,6 +32,18 @@ public abstract class SafetyException extends RuntimeException {
         }
     }
 
+    public static final class CommandTooSoon extends SafetyException {
+        public CommandTooSoon(final long id) {
+            super(SafetyError.COMMAND_TOO_SOON, "A command of the detector " + id + " was sent less than a minute ago");
+        }
+    }
+
+    public static final class CommandNotSent extends SafetyException {
+        public CommandNotSent(final long id) {
+            super(SafetyError.COMMAND_NOT_SENT, "The command of the detector " + id + " could not be sent");
+        }
+    }
+
     public static final class DetectorNotFound extends SafetyException {
         public DetectorNotFound(final long id) {
             super(SafetyError.NOT_FOUND_DETECTOR, "No fire detector of the id " + id);

@@ -14,9 +14,11 @@ import org.springframework.http.codec.ServerCodecConfigurer;
 
 import java.util.Map;
 
+import static org.springframework.http.HttpStatus.BAD_GATEWAY;
 import static org.springframework.http.HttpStatus.BAD_REQUEST;
 import static org.springframework.http.HttpStatus.NOT_FOUND;
 import static org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE;
+import static org.springframework.http.HttpStatus.TOO_MANY_REQUESTS;
 
 //The error contract of the organization (cholewa-commons) with one processor per cause of a refused request
 @Configuration
@@ -38,7 +40,10 @@ public class ExceptionHandlerConfig {
             SafetyException.RoomNotFound.class, new DomainExceptionProcessor(NOT_FOUND, SafetyError.NOT_FOUND_ROOM),
             SafetyException.DetectorNotFound.class,
             new DomainExceptionProcessor(NOT_FOUND, SafetyError.NOT_FOUND_DETECTOR),
-            SafetyException.InvalidRange.class, new DomainExceptionProcessor(BAD_REQUEST, SafetyError.INVALID_RANGE)
+            SafetyException.InvalidRange.class, new DomainExceptionProcessor(BAD_REQUEST, SafetyError.INVALID_RANGE),
+            SafetyException.CommandTooSoon.class,
+            new DomainExceptionProcessor(TOO_MANY_REQUESTS, SafetyError.COMMAND_TOO_SOON),
+            SafetyException.CommandNotSent.class, new DomainExceptionProcessor(BAD_GATEWAY, SafetyError.COMMAND_NOT_SENT)
         ));
     }
 }
