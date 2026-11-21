@@ -44,6 +44,12 @@ public abstract class SafetyException extends RuntimeException {
         }
     }
 
+    public static final class NothingToMute extends SafetyException {
+        public NothingToMute(final long id) {
+            super(SafetyError.NOTHING_TO_MUTE, "The detector " + id + " is not in alarm - there is nothing to mute");
+        }
+    }
+
     public static final class DetectorNotFound extends SafetyException {
         public DetectorNotFound(final long id) {
             super(SafetyError.NOT_FOUND_DETECTOR, "No fire detector of the id " + id);

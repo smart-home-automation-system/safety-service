@@ -128,8 +128,17 @@ never scaled (state in memory). Org-wide rules: `organization-repository/claude/
   true once answered. The third unconfirmed in a row of a detector is an alert on the technical channel, once a run (not
   announced when the publish failed - the next tries again). In memory: a restart forgets the minute and the judgement.
   **`safety_command` (V4)**: a row per command sent (bounded at 5 s, a WARN otherwise - the command stands),
-  `confirmed_at` marked by the request id once the insert of that row ended (a fast answer would update no row); `GET /{id}/commands` the last 50. What the base did with the first real
-  commands: to be written here after the try with the owner.
+  `confirmed_at` marked by the request id once the insert of that row ended (a fast answer would update no row); `GET /{id}/commands` the last 50.
+  **What the base did with the first real commands** (2026-11-21, the detector of sanctum, 155 / `00000006`, with the
+  owner at it): the base took both from its queue (`mqtt-subscription-SBS50148A0EE8qos1`, one consumer, nothing left).
+  **A self test** sounded the detector and was answered 5.5 s after the sending by its self test topic, dated after it
+  (`problem` false). **A mute of a detector not in alarm** did nothing - no sound, no `muted` Muted, unconfirmed
+  after the window - so **a mute is refused for a detector not in alarm**: `409 NOTHING_TO_MUTE`, judged by the
+  `alarm` flag in memory (not known is no alarm), before the minute is taken, nothing sent; the dashboard offers Mute
+  only while the detector is in alarm. The alarm read is `smokealarm`: a CO or heat detector, whose alarm entity is not
+  read yet, cannot be muted until it is. Accepted: an alarm read back at a start (not confirmed) lets a mute through
+  until the resync corrects it - a mute the base then ignores counts as one unconfirmed command. A mute during a real alarm is not proven - never staged (a fire alarm is not
+  set off for a test); the first real one will tell.
 - **Boot 4.2 is not taken yet** (checked 2026-11-20): Boot 4.2.0 moved RabbitMQ to `spring-boot-starter-rabbitmq`
   (`org.springframework.boot.rabbitmq.autoconfigure`) and `spring-boot-starter-amqp` no longer brings `spring-rabbit` -
   the listener, `BirthMessage` and `NotificationRabbitConfig` do not compile, and cholewa-commons 1.14.0 reaches the

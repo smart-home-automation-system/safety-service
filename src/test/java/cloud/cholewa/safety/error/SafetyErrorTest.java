@@ -13,6 +13,6 @@ class SafetyErrorTest {
     void should_keep_the_codes_the_dashboard_reads() {
         assertThat(Arrays.stream(SafetyError.values()).map(Enum::name))
             .containsExactly("REGISTRY_UNAVAILABLE", "NOT_FOUND_ROOM", "NOT_FOUND_DETECTOR", "INVALID_RANGE",
-                "COMMAND_TOO_SOON", "COMMAND_NOT_SENT");
+                "COMMAND_TOO_SOON", "COMMAND_NOT_SENT", "NOTHING_TO_MUTE");
     }
 }

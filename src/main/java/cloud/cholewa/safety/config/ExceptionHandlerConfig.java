@@ -16,6 +16,7 @@ import java.util.Map;
 
 import static org.springframework.http.HttpStatus.BAD_GATEWAY;
 import static org.springframework.http.HttpStatus.BAD_REQUEST;
+import static org.springframework.http.HttpStatus.CONFLICT;
 import static org.springframework.http.HttpStatus.NOT_FOUND;
 import static org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE;
 import static org.springframework.http.HttpStatus.TOO_MANY_REQUESTS;
@@ -43,7 +44,8 @@ public class ExceptionHandlerConfig {
             SafetyException.InvalidRange.class, new DomainExceptionProcessor(BAD_REQUEST, SafetyError.INVALID_RANGE),
             SafetyException.CommandTooSoon.class,
             new DomainExceptionProcessor(TOO_MANY_REQUESTS, SafetyError.COMMAND_TOO_SOON),
-            SafetyException.CommandNotSent.class, new DomainExceptionProcessor(BAD_GATEWAY, SafetyError.COMMAND_NOT_SENT)
+            SafetyException.CommandNotSent.class, new DomainExceptionProcessor(BAD_GATEWAY, SafetyError.COMMAND_NOT_SENT),
+            SafetyException.NothingToMute.class, new DomainExceptionProcessor(CONFLICT, SafetyError.NOTHING_TO_MUTE)
         ));
     }
 }
