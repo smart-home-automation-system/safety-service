@@ -27,7 +27,10 @@ public enum SafetyError implements ErrorId {
     COMMAND_TOO_SOON("Command too soon"),
 
     //the command could not be sent to the broker - the base got nothing (HAS-464)
-    COMMAND_NOT_SENT("Command not sent");
+    COMMAND_NOT_SENT("Command not sent"),
+
+    //a mute of a detector not in alarm: the base takes it and does nothing (tried on the real base 2026-11-21, HAS-464)
+    NOTHING_TO_MUTE("Nothing to mute");
 
     private final String description;
 }

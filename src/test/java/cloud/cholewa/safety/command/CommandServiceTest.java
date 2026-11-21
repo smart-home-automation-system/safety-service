@@ -4,6 +4,10 @@ import cloud.cholewa.commons.notification.NotificationPublisher;
 import cloud.cholewa.home.model.DeviceKind;
 import cloud.cholewa.home.model.RoomName;
 import cloud.cholewa.safety.database.CommandStore;
+import cloud.cholewa.safety.detector.DetectorFlag;
+import cloud.cholewa.safety.detector.DetectorState;
+import cloud.cholewa.safety.detector.SafetyStates;
+import cloud.cholewa.safety.error.SafetyException;
 import cloud.cholewa.safety.registry.Detector;
 import cloud.cholewa.safety.registry.DetectorRegistry;
 import cloud.cholewa.safety.xsense.CommandMessage;
@@ -42,11 +46,12 @@ class CommandServiceTest {
         DeviceKind.SMOKE_DETECTOR, STATION, "00000002");
 
     private final DetectorCommands commands = new DetectorCommands();
+    private final SafetyStates states = new SafetyStates();
     private final NotificationPublisher notificationPublisher = mock(NotificationPublisher.class);
     private final DetectorRegistry registry = mock(DetectorRegistry.class);
     private final CommandMessage message = mock(CommandMessage.class);
     private final CommandStore store = mock(CommandStore.class);
-    private final CommandService service = new CommandService(registry, commands, message, store,
+    private final CommandService service = new CommandService(registry, commands, states, message, store,
         notificationPublisher, Clock.fixed(NOW, ZoneId.of("Europe/Warsaw")));
 
     //the base republishes the result of its last test at every resync: a test it dates before the sending answers
@@ -76,6 +81,7 @@ class CommandServiceTest {
         when(store.insert(anyLong(), anyString(), anyString(), anyString(), any()))
             .thenReturn(insert.asMono().doOnSuccess(done -> order.add("insert")));
         when(store.confirm(anyString(), any())).thenReturn(Mono.fromRunnable(() -> order.add("confirm")));
+        alarm(true);
 
         service.command(KITCHEN.id(), DetectorCommand.MUTE, CommandSource.DASHBOARD).subscribe();
         service.reported(KITCHEN.id(), DetectorCommand.MUTE);
@@ -85,6 +91,43 @@ class CommandServiceTest {
         assertThat(order).containsExactly("insert", "confirm");
     }
 
+    //the base takes a mute of a quiet detector and does nothing (2026-11-21): refused before its minute is taken -
+    //no alarm reported, or not known; a self test of a quiet detector goes
+    @Test
+    void should_mute_only_a_detector_in_alarm() {
+        known();
+        when(message.send(anyString(), anyString(), anyString(), any())).thenReturn(Mono.empty());
+        when(store.insert(anyLong(), anyString(), anyString(), anyString(), any())).thenReturn(Mono.empty());
+
+        service.command(KITCHEN.id(), DetectorCommand.MUTE, CommandSource.DASHBOARD).as(StepVerifier::create)
+            .verifyError(SafetyException.NothingToMute.class);
+        alarm(false);
+        service.command(KITCHEN.id(), DetectorCommand.MUTE, CommandSource.DASHBOARD).as(StepVerifier::create)
+            .verifyError(SafetyException.NothingToMute.class);
+        verify(message, never()).send(anyString(), anyString(), anyString(), any());
+
+        alarm(true);
+        service.command(KITCHEN.id(), DetectorCommand.MUTE, CommandSource.DASHBOARD).as(StepVerifier::create)
+            .assertNext(reply -> assertThat(reply.command()).isEqualTo("mute"))
+            .verifyComplete();
+    }
+
+    @Test
+    void should_self_test_a_detector_not_in_alarm() {
+        known();
+        when(message.send(anyString(), anyString(), anyString(), any())).thenReturn(Mono.empty());
+        when(store.insert(anyLong(), anyString(), anyString(), anyString(), any())).thenReturn(Mono.empty());
+
+        service.command(KITCHEN.id(), DetectorCommand.SELF_TEST, CommandSource.DASHBOARD).as(StepVerifier::create)
+            .assertNext(reply -> assertThat(reply.command()).isEqualTo("self test"))
+            .verifyComplete();
+    }
+
+    private void alarm(final boolean value) {
+        states.changeDetector(KITCHEN.id(), id -> DetectorState.unknown(id, NOW),
+            state -> state.withFlag(DetectorFlag.ALARM, value, NOW));
+    }
+
     //a send cut off by its timeout may still go out: taken like a sent one - its minute kept, its row written
     @Test
     void should_take_a_send_cut_off_by_its_timeout_like_a_sent_one() {
@@ -92,6 +135,7 @@ class CommandServiceTest {
         when(message.send(anyString(), anyString(), anyString(), any()))
             .thenReturn(Mono.error(new TimeoutException("10 s")));
         when(store.insert(anyLong(), anyString(), anyString(), anyString(), any())).thenReturn(Mono.empty());
+        alarm(true);
 
         service.command(KITCHEN.id(), DetectorCommand.MUTE, CommandSource.DASHBOARD).as(StepVerifier::create)
             .assertNext(reply -> assertThat(reply.command()).isEqualTo("mute"))

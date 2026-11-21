@@ -100,6 +100,8 @@ class SafetyControllerTest {
         when(commandMessage.send(anyString(), anyString(), anyString(), any())).thenReturn(Mono.empty());
         when(commandStore.insert(anyLong(), anyString(), anyString(), anyString(), any())).thenReturn(Mono.empty());
         when(commandStore.confirm(anyString(), any())).thenReturn(Mono.empty());
+        states.changeDetector(150L, id -> DetectorState.unknown(id, NOW),
+            state -> state.withFlag(DetectorFlag.ALARM, true, NOW));
 
         webTestClient.post().uri("/150/mute").exchange()
             .expectStatus().isAccepted()
@@ -128,8 +130,8 @@ class SafetyControllerTest {
         verify(commandStore).confirm(anyString(), eq(NOW));
     }
 
-    //a source not one of the words, a detector not in the registry, a broker that did not take it (the minute given
-    //back)
+    //a source not one of the words, a detector not in the registry, a mute of a detector not in alarm (409 - the base
+    //would do nothing), a broker that did not take it (the minute given back)
     @Test
     void should_refuse_a_command_it_cannot_send() {
         readRegistry();
@@ -141,9 +143,12 @@ class SafetyControllerTest {
             .expectStatus().isNotFound()
             .expectBody().jsonPath("$.errors[0].code").isEqualTo("NOT_FOUND_DETECTOR");
         webTestClient.post().uri("/150/mute").exchange()
+            .expectStatus().isEqualTo(409)
+            .expectBody().jsonPath("$.errors[0].code").isEqualTo("NOTHING_TO_MUTE");
+        webTestClient.post().uri("/150/self-test").exchange()
             .expectStatus().isEqualTo(502)
             .expectBody().jsonPath("$.errors[0].code").isEqualTo("COMMAND_NOT_SENT");
-        webTestClient.post().uri("/150/mute").exchange()
+        webTestClient.post().uri("/150/self-test").exchange()
             .expectStatus().isEqualTo(502);
         verify(commandStore, never()).insert(anyLong(), anyString(), anyString(), anyString(), any());
     }

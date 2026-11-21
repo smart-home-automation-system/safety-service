@@ -65,6 +65,8 @@ base station) from what its base publishes to the broker over MQTT - the Home As
   Never repeated. The base answers by the state of the detector: a mute is confirmed by `muted` Muted, a self test by a
   message of its self test, each within 60 s; the third unconfirmed command of a detector in a row is an alert on the
   technical channel. Every command sent is kept in `safety_command` (V4); a self test the base dates (its `time`) answers only a test sent before it.
+  A mute is sent only to a detector in alarm (`409 NOTHING_TO_MUTE` otherwise): the base takes a mute of a quiet
+  detector and does nothing (tried on the real base on 2026-11-21).
 
 # API
 
@@ -78,8 +80,8 @@ a default.
 | `GET` | `/status` | The technical state (HAS-463): `bases` - every base station of the registry: `stationSerial`, `reachable` (its availability, left out while not known), `lastHeardAt` (itself or any of its detectors), `ipAddress`, `wifiRssi`, `silent`; `detectorsInTrouble` - how many detectors report offline, low battery, end of life or a fault now; `alerts` - the open alerts of the monitor: `kind` (`offline`, `battery`, `end of life`, `fault`, `base offline`, `base silent`), `device`, `name`, `since`, `told`. `503 REGISTRY_UNAVAILABLE` before the first read of the registry. |
 | `GET` | `/rooms/{room}` | The detectors of a room (`living room`, ...); `404 NOT_FOUND_ROOM` for a room without one or no room at all. |
 | `GET` | `/{id}` | One detector by its registry id; `404 NOT_FOUND_DETECTOR`. Since HAS-464 a detector also answers `lastCommandConfirmed` - false once the base did not answer its last mute or self test within 60 s, true once it did, left out with no command since the start and while one waits. |
-| `POST` | `/{id}/mute?source=` | Mutes the detector (HAS-464): the command published to its base once, `202` with `detectorId`, `command` (`mute`), `source`, `requestId`, `sentAt`. `source` - `dashboard` (the default) or `manual`, any other word `400`. `404 NOT_FOUND_DETECTOR`, `429 COMMAND_TOO_SOON` (one command per detector a minute), `502 COMMAND_NOT_SENT` (it could not be sent; a send cut off by its timeout may still go out and is answered `202`), `503 REGISTRY_UNAVAILABLE`. |
-| `POST` | `/{id}/self-test?source=` | Starts the self test of the detector, as the mute (`command` `self test`). |
+| `POST` | `/{id}/mute?source=` | Mutes the detector (HAS-464): the command published to its base once, `202` with `detectorId`, `command` (`mute`), `source`, `requestId`, `sentAt`. `source` - `dashboard` (the default) or `manual`, any other word `400`. `404 NOT_FOUND_DETECTOR`, `409 NOTHING_TO_MUTE` (the detector is not in alarm - by the last `alarm` of its base; checked before the minute is taken), `429 COMMAND_TOO_SOON` (one command per detector a minute), `502 COMMAND_NOT_SENT` (it could not be sent; a send cut off by its timeout may still go out and is answered `202`), `503 REGISTRY_UNAVAILABLE`. |
+| `POST` | `/{id}/self-test?source=` | Starts the self test of the detector, as the mute (`command` `self test`) - of any detector, in alarm or not (no `409`). |
 | `GET` | `/{id}/commands` | The last 50 commands of the detector, the newest first: `requestId`, `command`, `source`, `sentAt`, `confirmedAt` (left out while the base has not answered). `404 NOT_FOUND_DETECTOR`. |
 
 # Run locally

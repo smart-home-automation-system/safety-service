@@ -4,6 +4,9 @@ import cloud.cholewa.commons.notification.NotificationPublisher;
 import cloud.cholewa.safety.api.model.CommandRecordReply;
 import cloud.cholewa.safety.api.model.CommandReply;
 import cloud.cholewa.safety.database.CommandStore;
+import cloud.cholewa.safety.detector.DetectorFlag;
+import cloud.cholewa.safety.detector.Flag;
+import cloud.cholewa.safety.detector.SafetyStates;
 import cloud.cholewa.safety.error.SafetyException;
 import cloud.cholewa.safety.registry.Detector;
 import cloud.cholewa.safety.registry.DetectorRegistry;
@@ -36,6 +39,10 @@ import java.util.concurrent.TimeoutException;
  * a WARN, {@code lastCommandConfirmed} false in the reads, the third in a row of a detector an alert on the technical
  * channel (once a run). A send cut off by its timeout may still go out: it is taken like a sent one and waits for its
  * answer. A send that failed gives its minute back and answers {@code COMMAND_NOT_SENT}.
+ * <p>
+ * A mute is sent only to a detector in alarm ({@code NOTHING_TO_MUTE} otherwise, before its minute is taken): the base
+ * takes a mute of a quiet detector and does nothing - no sound, no {@code muted} Muted (tried on 2026-11-21) - so it
+ * would only count as unconfirmed and, the third time, alert for nothing.
  */
 @Slf4j
 @Service
@@ -54,6 +61,7 @@ public class CommandService {
 
     private final DetectorRegistry registry;
     private final DetectorCommands commands;
+    private final SafetyStates states;
     private final CommandMessage message;
     private final CommandStore store;
     private final NotificationPublisher notificationPublisher;
@@ -64,10 +72,22 @@ public class CommandService {
     private final Map<String, Mono<Void>> inserts = new ConcurrentHashMap<>();
 
     public Mono<CommandReply> command(final long id, final DetectorCommand command, final CommandSource source) {
-        return known(id).flatMap(detector -> Mono.fromSupplier(this::now)
-            .filter(now -> commands.reserve(id, now))
-            .switchIfEmpty(Mono.error(() -> new SafetyException.CommandTooSoon(id)))
-            .flatMap(now -> send(detector, new CommandWatch.Pending("sh-" + UUID.randomUUID(), command, now), source)));
+        return known(id)
+            .filter(detector -> command != DetectorCommand.MUTE || inAlarm(id))
+            .switchIfEmpty(Mono.error(() -> new SafetyException.NothingToMute(id)))
+            .flatMap(detector -> Mono.fromSupplier(this::now)
+                .filter(now -> commands.reserve(id, now))
+                .switchIfEmpty(Mono.error(() -> new SafetyException.CommandTooSoon(id)))
+                .flatMap(now -> send(detector, new CommandWatch.Pending("sh-" + UUID.randomUUID(), command, now),
+                    source)));
+    }
+
+    //the alarm as the base last reported it; not known is no alarm - nothing a mute could silence
+    private boolean inAlarm(final long id) {
+        return states.detector(id)
+            .map(state -> state.flag(DetectorFlag.ALARM))
+            .map(Flag::value)
+            .orElse(false);
     }
 
     /** The last {@link #HISTORY} commands of the detector, the newest first. */
