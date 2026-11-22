@@ -2,10 +2,12 @@ package cloud.cholewa.safety.detector;
 
 import cloud.cholewa.home.model.DeviceKind;
 import cloud.cholewa.home.model.RoomName;
+import cloud.cholewa.safety.automation.FireReactions;
 import cloud.cholewa.safety.database.AlarmStore;
 import cloud.cholewa.safety.household.HouseholdNotifier;
 import cloud.cholewa.safety.registry.Detector;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import reactor.core.publisher.Mono;
@@ -18,6 +20,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -38,7 +41,14 @@ class AlarmEpisodesTest {
 
     private final AlarmStore store = mock(AlarmStore.class);
     private final HouseholdNotifier notifier = mock(HouseholdNotifier.class);
-    private final AlarmEpisodes sut = new AlarmEpisodes(store, notifier, Clock.fixed(NOW, ZoneId.of("Europe/Warsaw")));
+    private final FireReactions reactions = mock(FireReactions.class);
+    private final AlarmEpisodes sut = new AlarmEpisodes(store, notifier, reactions,
+        Clock.fixed(NOW, ZoneId.of("Europe/Warsaw")));
+
+    @BeforeEach
+    void setUp() {
+        when(reactions.react(any(), any())).thenReturn(Mono.empty());
+    }
 
     @AfterEach
     void tearDown() {
@@ -58,6 +68,18 @@ class AlarmEpisodesTest {
         order.verify(notifier).fireAlarm(KITCHEN, NOW);
         order.verify(store).markAlarmTold(7L, NOW);
         assertThat(sut.isOpen(151L)).isTrue();
+        verify(reactions).react(7L, KITCHEN);
+    }
+
+    //HAS-468: the reactions run beside the household - a household not told yet never holds them, nor they it
+    @Test
+    void should_react_while_the_household_is_being_told() {
+        when(store.open(151L, "kitchen", NOW)).thenReturn(Mono.just(7L));
+        when(notifier.fireAlarm(KITCHEN, NOW)).thenReturn(Mono.never());
+
+        sut.alarm(KITCHEN, true);
+
+        verify(reactions, timeout(2000)).react(7L, KITCHEN);
     }
 
     //the base repeats the state: a Detected of a detector with an open episode is no new one
@@ -72,6 +94,7 @@ class AlarmEpisodesTest {
 
         verify(notifier).fireAlarm(KITCHEN, NOW);
         verify(store).open(151L, "kitchen", NOW);
+        verify(reactions).react(7L, KITCHEN);
     }
 
     @Test
@@ -105,6 +128,8 @@ class AlarmEpisodesTest {
         sut.alarm(KITCHEN, true);
 
         verifyNoInteractions(store, notifier);
+        //an episode open before the start was reacted to then: never a second time (HAS-468)
+        verify(reactions, never()).react(any(), any());
     }
 
     //a database away never keeps the household from being told; only the mark is missing
@@ -122,6 +147,9 @@ class AlarmEpisodesTest {
         verify(notifier).fireAlarmOver(KITCHEN, NOW);
         verify(store, never()).markAlarmTold(anyLong(), any());
         verify(store, never()).markOverTold(anyLong(), any());
+        //the reactions go without the episode stored, and nothing at its end
+        verify(reactions).react(isNull(), eq(KITCHEN));
+        verify(reactions, times(1)).react(any(), any());
     }
 
     //a database that does not answer holds the household for STORE_WITHIN at most, never the retries of the store

@@ -1,5 +1,6 @@
 package cloud.cholewa.safety.detector;
 
+import cloud.cholewa.safety.automation.FireReactions;
 import cloud.cholewa.safety.database.AlarmStore;
 import cloud.cholewa.safety.household.HouseholdNotifier;
 import cloud.cholewa.safety.registry.Detector;
@@ -26,6 +27,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * <b>The household is told whatever the database says</b>: a database away or slow (beyond {@link #STORE_WITHIN}) is a
  * WARN, the alarm is told all the same and only its mark is missing; the open episodes in memory keep a repeated Detected from telling it twice. A
  * notification never fails nor stalls an episode - {@link HouseholdNotifier} answers false within its bound.
+ * <p>
+ * Since HAS-468 a newly opened episode also runs the reactions of {@link FireReactions} (behind their switches), at the
+ * same time as the household is told - neither waits for the other, both are bounded at 30 s and never fail.
  */
 @Slf4j
 @Component
@@ -40,14 +44,17 @@ public class AlarmEpisodes {
 
     private final AlarmStore store;
     private final HouseholdNotifier notifier;
+    private final FireReactions reactions;
     private final Clock clock;
     private final Set<Long> open = ConcurrentHashMap.newKeySet();
     private final Sinks.Many<Mono<Void>> work = Sinks.many().unicast().onBackpressureBuffer();
     private final Disposable subscription;
 
-    public AlarmEpisodes(final AlarmStore store, final HouseholdNotifier notifier, final Clock clock) {
+    public AlarmEpisodes(final AlarmStore store, final HouseholdNotifier notifier, final FireReactions reactions,
+                         final Clock clock) {
         this.store = store;
         this.notifier = notifier;
+        this.reactions = reactions;
         this.clock = clock;
         this.subscription = work.asFlux()
             .concatMap(job -> job.onErrorResume(failure -> {
@@ -88,14 +95,16 @@ public class AlarmEpisodes {
                 return Mono.empty();
             })
             .defaultIfEmpty(NOT_STORED)
-            .flatMap(id -> notifier.fireAlarm(detector, at)
-                .filter(told -> told && id != NOT_STORED)
-                .flatMap(told -> store.markAlarmTold(id, clock.instant()).timeout(STORE_WITHIN))
-                .onErrorResume(failure -> {
-                    log.warn("The fire alarm of the detector {} was told, its mark not stored: {}", detector.id(),
-                        failure.toString());
-                    return Mono.empty();
-                }));
+            .flatMap(id -> Mono.when(
+                notifier.fireAlarm(detector, at)
+                    .filter(told -> told && id != NOT_STORED)
+                    .flatMap(told -> store.markAlarmTold(id, clock.instant()).timeout(STORE_WITHIN))
+                    .onErrorResume(failure -> {
+                        log.warn("The fire alarm of the detector {} was told, its mark not stored: {}", detector.id(),
+                            failure.toString());
+                        return Mono.empty();
+                    }),
+                reactions.react(id == NOT_STORED ? null : id, detector)));
     }
 
     private Mono<Void> closed(final Detector detector, final Instant at) {

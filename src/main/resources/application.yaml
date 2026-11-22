@@ -86,6 +86,10 @@ internal:
   service:
     # the detectors of the device registry
     database: http://database-service:6200
+    # the reactions to a fire alarm (HAS-468): the lights, the blinds, the air conditioners
+    light: http://light-service:6200
+    blinds: http://blinds-service:6200
+    aircon: http://aircon-service:6200
 
 cholewa:
   # refuses the start before the first bean when one of these has no value (cholewa-commons >= 1.9.0)
@@ -150,6 +154,9 @@ notification:
 internal:
   service:
     database: http://localhost:6005
+    light: http://localhost:6012
+    blinds: http://localhost:6011
+    aircon: http://localhost:6015
 
 server:
   port: 6017
@@ -192,6 +199,9 @@ notification:
 internal:
   service:
     database: http://localhost:1
+    light: http://localhost:1
+    blinds: http://localhost:1
+    aircon: http://localhost:1
 
 # the pool opens nothing eagerly, and Flyway is off: a context test never reaches a database
 database:

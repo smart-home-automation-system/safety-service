@@ -9,6 +9,7 @@ never scaled (state in memory). Org-wide rules: `organization-repository/claude/
 
 ## Role in the system
 
+- Calls (HAS-468): light-service, blinds-service and aircon-service for the reactions to a fire alarm.
 - Talks to: the device events on `device.prod.safety` of `/device` (user `device`, definitions 1.10.0) - the topics of
   the base in `deployment-tools/scripts/xsense/devices.md`; the same connection publishes the birth message to
   `amq.topic`; database-service for the detectors of the registry. Since HAS-461 a second connection to `/notification`
@@ -22,7 +23,7 @@ never scaled (state in memory). Org-wide rules: `organization-repository/claude/
 ## Build & run
 
 - Build + tests: `mvn verify` - **needs a running Docker** (`StateStoreTest`, `AlarmStoreTest`, `AlertStoreTest`,
-  `CommandStoreTest`: Testcontainers PostgreSQL).
+  `CommandStoreTest`, `AutomationStoreTest`: Testcontainers PostgreSQL).
 - Local run: `local` Spring profile, port `6017` (Actuator `8017`); the real values reach the production database and
   the real base.
 
@@ -139,6 +140,24 @@ never scaled (state in memory). Org-wide rules: `organization-repository/claude/
   read yet, cannot be muted until it is. Accepted: an alarm read back at a start (not confirmed) lets a mute through
   until the resync corrects it - a mute the base then ignores counts as one unconfirmed command. A mute during a real alarm is not proven - never staged (a fire alarm is not
   set off for a test); the first real one will tell.
+- **The reactions to a fire alarm** (HAS-468, `automation/`): three switches of the administrator, all off by default -
+  `safety_automation` (V5, one row, `GET` / `PUT /automation`; `AutomationService` takes a body of exactly the three
+  booleans as a `Map` and names what is wrong - `INVALID_AUTOMATION`, no strict Jackson setting needed).
+  `AlarmEpisodes.opened` runs `FireReactions.react` **beside** the household (`Mono.when` after the row - neither waits
+  for the other; the episode id, null when not stored), so once per newly opened episode: an episode read back at the
+  start is never reacted to, nothing is switched back at its end. `FireReactions` reads the switches
+  (`AutomationService.forAlarm`: the database within 5 s, the switches last read or written otherwise, none known -
+  nothing sent, a WARN), logs the decision (all off - nothing sent), then at once: `lightsOn` - the room of the detector
+  and both halls (`lightRooms`, each once; no room - the halls alone), `blindsUp` - the room of the detector (none
+  without a room), `airconOff` - every unit `GET /home/aircon` answers `power: true`. `HouseServicesClient` (its own
+  `WebClient` of the injected builder, `houseServicesWebClient`, 20 s a call, k8s DNS - `internal.service.light` /
+  `blinds` / `aircon`) sends each with `source=safety` (light-service >= 0.12.0, blinds-service >= 0.12.0,
+  aircon-service >= 0.12.0) and answers its outcome, never an error: 2xx `sent`, 404 `none` (a room without lights or
+  blinds), anything else `failed` (logged by its status, never the body). Every call a row of `safety_reaction_run`
+  (V6, 5 s, a WARN otherwise; a failed read of the units one `failed` row without a target); all bounded at 30 s
+  together. `GET /automation/runs` by the rules of `/alarms` (`AlarmService.problemOf`). **Never touched**: the
+  furnace (boiler-service has no API - a later task if the owner wants it). A dry run with the switches on is proven only
+  with the owner against a Detected injected on the broker - no detector is set off for it.
 - **Boot 4.2 is not taken yet** (checked 2026-11-20): Boot 4.2.0 moved RabbitMQ to `spring-boot-starter-rabbitmq`
   (`org.springframework.boot.rabbitmq.autoconfigure`) and `spring-boot-starter-amqp` no longer brings `spring-rabbit` -
   the listener, `BirthMessage` and `NotificationRabbitConfig` do not compile, and cholewa-commons 1.14.0 reaches the
