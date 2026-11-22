@@ -67,6 +67,17 @@ base station) from what its base publishes to the broker over MQTT - the Home As
   technical channel. Every command sent is kept in `safety_command` (V4); a self test the base dates (its `time`) answers only a test sent before it.
   A mute is sent only to a detector in alarm (`409 NOTHING_TO_MUTE` otherwise): the base takes a mute of a quiet
   detector and does nothing (tried on the real base on 2026-11-21).
+- **The reactions to a fire alarm** (HAS-468), each behind a switch of the administrator, **all off by default**
+  (`safety_automation`, V5): `lightsOn` - the lights of the room of the detector and of both halls (hall down, hall up)
+  switched on through light-service; `blindsUp` - the blinds of the room of the detector opened through blinds-service;
+  `airconOff` - every air conditioner aircon-service reads as on switched off. Each call carries `source=safety`, so
+  the other services know it (light-service holds the lights like a person's change, aircon-service holds its rules
+  off for 30 min). **Once per newly opened episode** - never for an alarm open before a restart, nothing switched back
+  at its end - at the same time as the household is told; every call has its own outcome (a room without lights or
+  blinds answers 404 - none, not a failure), all of them bounded at 30 s together, each kept in
+  `safety_reaction_run` (V6). The switches are read from the database at the alarm (5 s at most, the last known
+  otherwise; none known - nothing sent); with all off the decision is logged and nothing is sent. **Never touched**:
+  the furnace (boiler-service has no API for it) and anything not named here.
 
 # API
 
@@ -82,6 +93,9 @@ a default.
 | `GET` | `/{id}` | One detector by its registry id; `404 NOT_FOUND_DETECTOR`. Since HAS-464 a detector also answers `lastCommandConfirmed` - false once the base did not answer its last mute or self test within 60 s, true once it did, left out with no command since the start and while one waits. |
 | `POST` | `/{id}/mute?source=` | Mutes the detector (HAS-464): the command published to its base once, `202` with `detectorId`, `command` (`mute`), `source`, `requestId`, `sentAt`. `source` - `dashboard` (the default) or `manual`, any other word `400`. `404 NOT_FOUND_DETECTOR`, `409 NOTHING_TO_MUTE` (the detector is not in alarm - by the last `alarm` of its base; checked before the minute is taken), `429 COMMAND_TOO_SOON` (one command per detector a minute), `502 COMMAND_NOT_SENT` (it could not be sent; a send cut off by its timeout may still go out and is answered `202`), `503 REGISTRY_UNAVAILABLE`. |
 | `POST` | `/{id}/self-test?source=` | Starts the self test of the detector, as the mute (`command` `self test`) - of any detector, in alarm or not (no `409`). |
+| `GET` | `/automation` | The switches of the reactions to a fire alarm: `lightsOn`, `blindsUp`, `airconOff` - each `true` or `false`, all `false` until switched on. |
+| `PUT` | `/automation` | Writes the switches whole - a JSON of exactly the three, each `true` or `false`; answers them. `400 INVALID_AUTOMATION` with the reason (a field missing, unknown or not a boolean, no body). |
+| `GET` | `/automation/runs?from=&to=` | The reactions sent in the period (the time of the house, at most 30 days), the newest first: `episode` (the id of the alarm episode, left out when it was not stored), `reaction` (the name of its switch), `target` (the room or the id of the air conditioner, left out when the units could not be read), `sentAt`, `outcome` (`sent`, `none` - nothing to do there, `failed`). `400 INVALID_RANGE`. |
 | `GET` | `/{id}/commands` | The last 50 commands of the detector, the newest first: `requestId`, `command`, `source`, `sentAt`, `confirmedAt` (left out while the base has not answered). `404 NOT_FOUND_DETECTOR`. |
 
 # Run locally

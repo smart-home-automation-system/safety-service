@@ -9,7 +9,10 @@ import cloud.cholewa.safety.command.DetectorCommand;
 import cloud.cholewa.safety.command.DetectorCommands;
 import cloud.cholewa.safety.config.ExceptionHandlerConfig;
 import cloud.cholewa.safety.config.SafetyProperties;
+import cloud.cholewa.safety.automation.AutomationService;
+import cloud.cholewa.safety.automation.AutomationSwitches;
 import cloud.cholewa.safety.database.AlarmStore;
+import cloud.cholewa.safety.database.AutomationStore;
 import cloud.cholewa.safety.database.CommandStore;
 import cloud.cholewa.safety.detector.AlarmService;
 import cloud.cholewa.safety.detector.BaseState;
@@ -36,6 +39,8 @@ import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.reactive.server.WebTestClient;
+import org.springframework.http.MediaType;
+import org.springframework.test.json.JsonCompareMode;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
@@ -61,7 +66,7 @@ import static org.mockito.Mockito.when;
 @WebFluxTest(SafetyController.class)
 @Import({ExceptionHandlerConfig.class, SafetyService.class, AlarmService.class, StatusService.class, TechnicalMonitor.class,
     SafetyStates.class, DetectorRegistry.class, CommandService.class, DetectorCommands.class,
-    CommandSourceConverter.class, SafetyControllerTest.FixedClock.class})
+    CommandSourceConverter.class, AutomationService.class, SafetyControllerTest.FixedClock.class})
 @ActiveProfiles("test")
 class SafetyControllerTest {
 
@@ -88,6 +93,66 @@ class SafetyControllerTest {
     private CommandStore commandStore;
     @Autowired
     private CommandService commandService;
+    @MockitoBean
+    private AutomationStore automationStore;
+
+    //HAS-468: the switches of the reactions, read and written whole - the body of the dashboard
+    @Test
+    void should_read_and_write_the_switches_of_the_reactions() {
+        when(automationStore.read()).thenReturn(Mono.just(new AutomationSwitches(false, false, false)));
+        when(automationStore.write(new AutomationSwitches(true, false, true), NOW)).thenReturn(Mono.empty());
+
+        webTestClient.get().uri("/automation").exchange()
+            .expectStatus().isOk()
+            .expectBody().json("""
+                {"lightsOn": false, "blindsUp": false, "airconOff": false}""", JsonCompareMode.STRICT);
+        webTestClient.put().uri("/automation")
+            .contentType(MediaType.APPLICATION_JSON)
+            .bodyValue("""
+                {"lightsOn": true, "blindsUp": false, "airconOff": true}""")
+            .exchange()
+            .expectStatus().isOk()
+            .expectBody().json("""
+                {"lightsOn": true, "blindsUp": false, "airconOff": true}""", JsonCompareMode.STRICT);
+        verify(automationStore).write(new AutomationSwitches(true, false, true), NOW);
+    }
+
+    @Test
+    void should_refuse_switches_that_are_not_the_three_of_them() {
+        webTestClient.put().uri("/automation")
+            .contentType(MediaType.APPLICATION_JSON)
+            .bodyValue("""
+                {"lightsOn": true, "blindsUp": false, "airconOff": true, "furnaceOff": true}""")
+            .exchange()
+            .expectStatus().isBadRequest()
+            .expectBody()
+            .jsonPath("$.errors[0].code").isEqualTo("INVALID_AUTOMATION")
+            .jsonPath("$.errors[0].details")
+            .isEqualTo("Unknown fields [furnaceOff] - the switches are [airconOff, blindsUp, lightsOn]");
+        webTestClient.put().uri("/automation").contentType(MediaType.APPLICATION_JSON).exchange()
+            .expectStatus().isBadRequest()
+            .expectBody().jsonPath("$.errors[0].code").isEqualTo("INVALID_AUTOMATION");
+        verify(automationStore, never()).write(any(), any());
+    }
+
+    @Test
+    void should_answer_the_reactions_of_a_period() {
+        when(automationStore.runs(Instant.parse("2026-11-19T23:00:00Z"), Instant.parse("2026-11-20T23:00:00Z")))
+            .thenReturn(Flux.just(
+                new AutomationStore.RunRow(7L, "lightsOn", "kitchen", NOW, "sent"),
+                new AutomationStore.RunRow(null, "airconOff", null, NOW, "failed")));
+
+        webTestClient.get().uri("/automation/runs?from=2026-11-20T00:00:00&to=2026-11-21T00:00:00").exchange()
+            .expectStatus().isOk()
+            .expectBody().json("""
+                [{"episode": 7, "reaction": "lightsOn", "target": "kitchen", "sentAt": "2026-11-20T11:00:00",
+                  "outcome": "sent"},
+                 {"reaction": "airconOff", "sentAt": "2026-11-20T11:00:00", "outcome": "failed"}]""",
+                JsonCompareMode.STRICT);
+        webTestClient.get().uri("/automation/runs?from=2026-10-01T00:00:00&to=2026-10-31T00:00:01").exchange()
+            .expectStatus().isBadRequest()
+            .expectBody().jsonPath("$.errors[0].code").isEqualTo("INVALID_RANGE");
+    }
 
     //HAS-464: 202 once the command was sent - to the topic of the detector, with a request id; one command per
     //detector a minute (429), the source by its word; whether the base answered is lastCommandConfirmed of the reads -

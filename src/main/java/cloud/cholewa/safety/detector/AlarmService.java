@@ -39,7 +39,7 @@ public class AlarmService {
     }
 
     //from included, to not; the wall time of the house plus the days - no duration between two local times
-    static Optional<String> problemOf(final LocalDateTime from, final LocalDateTime to) {
+    public static Optional<String> problemOf(final LocalDateTime from, final LocalDateTime to) {
         if (!from.isBefore(to)) {
             return Optional.of("from must be before to");
         }

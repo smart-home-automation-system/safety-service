@@ -50,6 +50,12 @@ public abstract class SafetyException extends RuntimeException {
         }
     }
 
+    public static final class InvalidAutomation extends SafetyException {
+        public InvalidAutomation(final String reason) {
+            super(SafetyError.INVALID_AUTOMATION, reason);
+        }
+    }
+
     public static final class DetectorNotFound extends SafetyException {
         public DetectorNotFound(final long id) {
             super(SafetyError.NOT_FOUND_DETECTOR, "No fire detector of the id " + id);

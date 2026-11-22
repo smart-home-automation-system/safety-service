@@ -45,7 +45,9 @@ public class ExceptionHandlerConfig {
             SafetyException.CommandTooSoon.class,
             new DomainExceptionProcessor(TOO_MANY_REQUESTS, SafetyError.COMMAND_TOO_SOON),
             SafetyException.CommandNotSent.class, new DomainExceptionProcessor(BAD_GATEWAY, SafetyError.COMMAND_NOT_SENT),
-            SafetyException.NothingToMute.class, new DomainExceptionProcessor(CONFLICT, SafetyError.NOTHING_TO_MUTE)
+            SafetyException.NothingToMute.class, new DomainExceptionProcessor(CONFLICT, SafetyError.NOTHING_TO_MUTE),
+            SafetyException.InvalidAutomation.class,
+            new DomainExceptionProcessor(BAD_REQUEST, SafetyError.INVALID_AUTOMATION)
         ));
     }
 }

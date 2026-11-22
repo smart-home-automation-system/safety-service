@@ -30,7 +30,10 @@ public enum SafetyError implements ErrorId {
     COMMAND_NOT_SENT("Command not sent"),
 
     //a mute of a detector not in alarm: the base takes it and does nothing (tried on the real base 2026-11-21, HAS-464)
-    NOTHING_TO_MUTE("Nothing to mute");
+    NOTHING_TO_MUTE("Nothing to mute"),
+
+    //a body of the switches of the reactions that is not the three of them, each true or false (HAS-468)
+    INVALID_AUTOMATION("Invalid automation");
 
     private final String description;
 }
