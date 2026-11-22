@@ -62,7 +62,7 @@ public class FireReactions {
             .filter(on -> on.on(Reaction.LIGHTS_ON))
             .flatMapMany(on -> Flux.fromIterable(lightRooms(detector.room())))
             .flatMap(room -> client.lightsOn(room)
-                .flatMap(outcome -> record(episode, Reaction.LIGHTS_ON, room.getValue(), outcome)))
+                .flatMap(outcome -> stored(episode, Reaction.LIGHTS_ON, room.getValue(), outcome)))
             .then();
     }
 
@@ -70,7 +70,7 @@ public class FireReactions {
         return Mono.justOrEmpty(detector.room())
             .filter(room -> switches.on(Reaction.BLINDS_UP))
             .flatMap(room -> client.blindsUp(room)
-                .flatMap(outcome -> record(episode, Reaction.BLINDS_UP, room.getValue(), outcome)));
+                .flatMap(outcome -> stored(episode, Reaction.BLINDS_UP, room.getValue(), outcome)));
     }
 
     private Mono<Void> aircon(final AutomationSwitches switches, final Long episode) {
@@ -79,10 +79,10 @@ public class FireReactions {
             .flatMapMany(on -> client.airconUnitsOn()
                 .onErrorResume(failure -> {
                     log.warn("The air conditioners were not read for the fire alarm: {}", failure.toString());
-                    return record(episode, Reaction.AIRCON_OFF, null, ReactionOutcome.FAILED).then(Mono.<Long>empty());
+                    return stored(episode, Reaction.AIRCON_OFF, null, ReactionOutcome.FAILED).then(Mono.<Long>empty());
                 }))
             .flatMap(id -> client.airconOff(id)
-                .flatMap(outcome -> record(episode, Reaction.AIRCON_OFF, String.valueOf(id), outcome)))
+                .flatMap(outcome -> stored(episode, Reaction.AIRCON_OFF, String.valueOf(id), outcome)))
             .then();
     }
 
@@ -94,7 +94,7 @@ public class FireReactions {
         return rooms;
     }
 
-    private Mono<Void> record(final Long episode, final Reaction reaction, final String target,
+    private Mono<Void> stored(final Long episode, final Reaction reaction, final String target,
                               final ReactionOutcome outcome) {
         return store.insertRun(episode, reaction, target, clock.instant(), outcome)
             .timeout(STORE_WITHIN)

@@ -85,7 +85,7 @@ class HouseServicesClientTest {
     }
 
     @Test
-    void should_take_any_other_answer_or_none_as_failed() throws IOException {
+    void should_take_any_other_answer_or_none_as_failed() {
         server.enqueue(new MockResponse.Builder().code(503).build());
 
         client.lightsOn(RoomName.KITCHEN).as(StepVerifier::create).expectNext(ReactionOutcome.FAILED).verifyComplete();
